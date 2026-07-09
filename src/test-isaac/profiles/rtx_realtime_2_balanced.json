@@ -1,0 +1,101 @@
+{
+  "profile_name": "rtx_realtime_2_balanced",
+  "options": {
+    "profile_name": "rtx_realtime_2_balanced",
+    "preset_name": "RTX Real-Time 2.0 - balanced",
+    "renderer": "RealTimePathTracing",
+    "width": 1280,
+    "height": 720,
+    "resolution": [
+      1280,
+      720
+    ],
+    "dlss_mode_name": "Balanced",
+    "dlss_exec_mode": 1,
+    "rt_subframes": 8,
+    "duration_frames": 90,
+    "warmup_frames": 20,
+    "path_spp": 16,
+    "path_total_spp": 16,
+    "max_bounces": 4,
+    "headless": false,
+    "denoiser": true,
+    "rgb": true,
+    "semantic_segmentation": false,
+    "bounding_box_2d_tight": false,
+    "gpu_telemetry": true,
+    "drone_motion_radius": 1.2,
+    "drone_motion_height": 1.2,
+    "object_motion_amplitude": 1.5,
+    "camera_position": [
+      4.2,
+      -5.2,
+      2.8
+    ],
+    "camera_look_at": [
+      0.0,
+      0.0,
+      0.85
+    ],
+    "focal_length": 35.0
+  },
+  "score": {
+    "smoothness_score": 49.0,
+    "quality_score": 80.0,
+    "smoothness_label": "medium",
+    "quality_label": "high",
+    "notes": [
+      "Sample profile. GUI will recompute scores when loaded."
+    ]
+  },
+  "launch_config": {
+    "headless": false,
+    "renderer": "RealTimePathTracing",
+    "width": 1280,
+    "height": 720,
+    "anti_aliasing": 3,
+    "sync_loads": true
+  },
+  "carb_settings": {
+    "/rtx/rendermode": "RealTimePathTracing",
+    "/rtx/post/dlss/execMode": 1
+  },
+  "scene": {
+    "num_frames": 90,
+    "warmup_frames": 20,
+    "drone_motion_radius": 1.2,
+    "drone_motion_height": 1.2,
+    "object_motion_amplitude": 1.5
+  },
+  "camera": {
+    "position": [
+      4.2,
+      -5.2,
+      2.8
+    ],
+    "look_at": [
+      0.0,
+      0.0,
+      0.85
+    ],
+    "focal_length": 35.0
+  },
+  "capture": {
+    "resolution": [
+      1280,
+      720
+    ],
+    "rt_subframes": 8,
+    "rgb": true,
+    "semantic_segmentation": false,
+    "bounding_box_2d_tight": false
+  },
+  "diagnostics": {
+    "gpu_telemetry": true,
+    "print_every_n_frames": 10,
+    "rolling_window_frames": 30
+  },
+  "output": {
+    "root": "render_outputs"
+  }
+}

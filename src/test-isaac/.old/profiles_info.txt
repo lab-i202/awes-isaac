@@ -1,0 +1,17 @@
+====================================================================================================
+Available Isaac Sim rendering profiles
+====================================================================================================
+Speed and quality use a 1 to 5 relative scale.
+Speed 5 means fastest. Quality 5 means highest visual quality.
+====================================================================================================
+profile                          renderer               speed quality recommended use
+-------------------------------------------------------------------------------------
+rtx_minimal_textured             MinimalRendering           5       1 First check that the Python script launches.
+legacy_raytraced_lighting        RaytracedLighting          4       2 Checking whether an older scene behaves differently.
+rtx_realtime_2_performance       RealTimePathTracing        4       3 Fast robotics RGB tests.
+rtx_realtime_2_balanced          RealTimePathTracing        3       4 First serious renderer test.
+rtx_realtime_2_quality           RealTimePathTracing        2       4 Higher-quality real-time rendering.
+pathtracing_preview              PathTracing                2       4 Quick path-tracing comparison.
+pathtracing_quality              PathTracing                1       5 High-quality visual reference.
+pathtracing_ultra                PathTracing                1       5 Final still-frame visual inspection.
+====================================================================================================

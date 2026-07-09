@@ -1,0 +1,536 @@
+# render_profiles.yaml
+#
+# Purpose:
+#   Central, self-documenting configuration for Isaac Sim rendering-profile tests.
+#
+# How to use:
+#   1. Pick a profile name from profile_order or profiles.
+#   2. Put that exact name in run.active_profile.
+#   3. Run:
+#        /path/to/isaac-sim/python.sh render_profile_test.py
+#
+# To see available profiles without launching Isaac Sim:
+#   Set:
+#        run.list_profiles_only: true
+#   Then run:
+#        /path/to/isaac-sim/python.sh render_profile_test.py
+#
+# To validate the selected profile without launching Isaac Sim:
+#   Set:
+#        run.validate_config_only: true
+#
+# Important:
+#   One Isaac Sim process should test one rendering profile.
+#   Do not hot-swap renderers inside one process if your goal is a clean comparison.
+#
+# Renderer family summaries:
+#   RTX Minimal - fastest, low fidelity.
+#   RTX Real-Time 2.0 - default practical robotics/synthetic-data mode.
+#   RTX Interactive Path Tracing - best visual fidelity, slow.
+#   Legacy RaytracedLighting - useful only as a compatibility baseline.
+#
+# Valid standalone renderer names documented by Isaac Sim include:
+#   RealTimePathTracing
+#   PathTracing
+#   RaytracedLighting
+#   MinimalRendering
+#
+# Recommended starting point:
+#   rtx_realtime_2_balanced
+#
+# Recommended visual-quality reference:
+#   pathtracing_quality
+#
+# Recommended speed baseline:
+#   rtx_minimal_textured
+
+run:
+  # Change this value to select the renderer profile.
+  #
+  # Available profiles:
+  #   rtx_minimal_textured
+  #   legacy_raytraced_lighting
+  #   rtx_realtime_2_performance
+  #   rtx_realtime_2_balanced
+  #   rtx_realtime_2_quality
+  #   pathtracing_preview
+  #   pathtracing_quality
+  #   pathtracing_ultra
+  #
+  # Best first choice:
+  #   rtx_realtime_2_balanced
+  #
+  # Best high-quality comparison:
+  #   pathtracing_quality
+  #
+  # Do not start with:
+  #   pathtracing_ultra
+  # because it is deliberately slow.
+  active_profile: "rtx_realtime_2_quality"
+
+  # If true, the script prints the profile catalog and exits before launching Isaac Sim.
+  list_profiles_only: false
+
+  # If true, the script validates the selected profile and exits before launching Isaac Sim.
+  validate_config_only: false
+
+  output_root: "./render_outputs"
+
+profile_order:
+  - "rtx_minimal_textured"
+  - "legacy_raytraced_lighting"
+  - "rtx_realtime_2_performance"
+  - "rtx_realtime_2_balanced"
+  - "rtx_realtime_2_quality"
+  - "pathtracing_preview"
+  - "pathtracing_quality"
+  - "pathtracing_ultra"
+
+profile_comparison_table:
+  columns:
+    - "profile"
+    - "renderer"
+    - "relative_speed"
+    - "relative_quality"
+    - "main_use"
+    - "recommended_role"
+  rows:
+    - profile: "rtx_minimal_textured"
+      renderer: "MinimalRendering"
+      relative_speed: 5
+      relative_quality: 1
+      main_use: "Fast sanity check."
+      recommended_role: "Speed baseline only."
+    - profile: "legacy_raytraced_lighting"
+      renderer: "RaytracedLighting"
+      relative_speed: 4
+      relative_quality: 2
+      main_use: "Compatibility check."
+      recommended_role: "Old-scene baseline."
+    - profile: "rtx_realtime_2_performance"
+      renderer: "RealTimePathTracing"
+      relative_speed: 4
+      relative_quality: 3
+      main_use: "Fast robotics RGB."
+      recommended_role: "Throughput-oriented real-time test."
+    - profile: "rtx_realtime_2_balanced"
+      renderer: "RealTimePathTracing"
+      relative_speed: 3
+      relative_quality: 4
+      main_use: "Balanced robotics and synthetic data."
+      recommended_role: "Default first choice."
+    - profile: "rtx_realtime_2_quality"
+      renderer: "RealTimePathTracing"
+      relative_speed: 2
+      relative_quality: 4
+      main_use: "Higher-quality real-time output."
+      recommended_role: "Practical quality choice."
+    - profile: "pathtracing_preview"
+      renderer: "PathTracing"
+      relative_speed: 2
+      relative_quality: 4
+      main_use: "Quick path-tracing comparison."
+      recommended_role: "Check whether path tracing matters."
+    - profile: "pathtracing_quality"
+      renderer: "PathTracing"
+      relative_speed: 1
+      relative_quality: 5
+      main_use: "High-quality reference frames."
+      recommended_role: "Visual-quality reference."
+    - profile: "pathtracing_ultra"
+      renderer: "PathTracing"
+      relative_speed: 1
+      relative_quality: 5
+      main_use: "Very slow reference frames."
+      recommended_role: "Final still-frame check only."
+
+renderer_families:
+  rtx_minimal:
+    display_name: "RTX Minimal"
+    summary: "RTX Minimal - fastest, low fidelity."
+    isaac_renderer: "MinimalRendering"
+    explanation: >
+      Minimal rendering is useful when you only need to verify that the scene,
+      camera, object motion, and writer pipeline are working. It is not a
+      serious photorealism profile.
+    best_used_for:
+      - "Very fast viewport sanity checks."
+      - "Debugging scene construction."
+      - "Debugging camera placement."
+      - "Debugging frame capture."
+    not_good_for:
+      - "Photorealism."
+      - "Final perception dataset generation."
+      - "Judging lighting, shadows, reflections, or material quality."
+    expected_result:
+      - "Fastest rendering."
+      - "Weakest visual quality."
+      - "Use only as a speed baseline."
+
+  rtx_realtime_2:
+    display_name: "RTX Real-Time 2.0"
+    summary: "RTX Real-Time 2.0 - default practical robotics/synthetic-data mode."
+    isaac_renderer: "RealTimePathTracing"
+    explanation: >
+      This is the practical starting point for robotics perception work.
+      It is intended to balance image quality and throughput.
+    best_used_for:
+      - "Interactive simulation."
+      - "Robotics workflows."
+      - "Synthetic-data generation when speed still matters."
+      - "Camera streams to ROS 2 or perception pipelines."
+    not_good_for:
+      - "Maximum still-image quality."
+      - "Final photorealistic reference rendering."
+    expected_result:
+      - "Good balance between speed and visual fidelity."
+      - "Usually the correct first choice for robotics perception work."
+
+  rtx_interactive_path_tracing:
+    display_name: "RTX Interactive Path Tracing"
+    summary: "RTX Interactive Path Tracing - best visual fidelity, slow."
+    isaac_renderer: "PathTracing"
+    explanation: >
+      Path tracing is the high-fidelity reference path. It is useful for
+      checking whether lighting, shadows, reflections, and material response
+      are substantially better than real-time rendering. It is not the right
+      default for closed-loop robotics simulation.
+    best_used_for:
+      - "High-quality visual validation."
+      - "Reference frame generation."
+      - "Lighting, reflection, shadow, and material checks."
+    not_good_for:
+      - "High-throughput synthetic-data generation."
+      - "Closed-loop real-time robotics testing."
+      - "Fast camera streaming."
+    expected_result:
+      - "Best image quality."
+      - "Slowest rendering."
+      - "Useful for quality reference, not speed."
+
+  legacy_raytraced_lighting:
+    display_name: "Legacy RaytracedLighting"
+    summary: "Legacy RaytracedLighting - useful only as a compatibility baseline."
+    isaac_renderer: "RaytracedLighting"
+    explanation: >
+      This renderer is included so old scenes or old scripts can be compared
+      against the newer Real-Time 2.0 path. Do not choose it as the main
+      renderer for a new high-fidelity workflow unless you have a compatibility
+      reason.
+    best_used_for:
+      - "Comparing older Isaac Sim scenes."
+      - "Compatibility checks."
+      - "Regression testing old scripts."
+    not_good_for:
+      - "New high-fidelity workflows."
+      - "Primary robotics perception rendering."
+    expected_result:
+      - "Useful baseline."
+      - "Not the preferred modern default."
+
+scene:
+  num_frames: 90
+  warmup_frames: 20
+  drone_motion_radius: 1.2
+  drone_motion_height: 1.2
+  object_motion_amplitude: 1.5
+
+camera:
+  position: [4.2, -5.2, 2.8]
+  look_at: [0.0, 0.0, 0.85]
+  focal_length: 35.0
+
+capture_defaults:
+  resolution: [1280, 720]
+  rt_subframes: 1
+  # rt_subframes 8 -> best temporal/render accumulation, slowest
+  # rt_subframes 4 -> faster, probably still acceptable
+  # rt_subframes 1 -> much faster, lowest stability/quality
+  rgb: true 
+  semantic_segmentation: false
+  bounding_box_2d_tight: false
+
+profiles:
+
+  rtx_minimal_textured:
+    family: "rtx_minimal"
+    user_label: "RTX Minimal - textured"
+    description: "Fastest visual sanity check. Low fidelity. Use only for throughput comparison."
+    relative_speed: 5
+    relative_quality: 1
+    recommended_for:
+      - "First check that the Python script launches."
+      - "First check that the camera writes images."
+      - "First check that the drone and target move."
+    avoid_if:
+      - "You are judging image realism."
+      - "You are preparing final synthetic data."
+    comparison_notes:
+      - "Should be much faster than path tracing."
+      - "Should look visibly worse than real-time and path-traced profiles."
+    launch_config:
+      headless: false
+      renderer: "MinimalRendering"
+      minimal_shading_mode: 2
+      width: 1280
+      height: 720
+      anti_aliasing: 0
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "MinimalRendering"
+      /rtx/minimal/mode: 2
+    capture:
+      resolution: [1280, 720]
+      rt_subframes: 1
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false
+
+  legacy_raytraced_lighting:
+    family: "legacy_raytraced_lighting"
+    user_label: "Legacy RaytracedLighting"
+    description: "Legacy RTX real-time baseline. Use only for compatibility comparison."
+    relative_speed: 4
+    relative_quality: 2
+    recommended_for:
+      - "Checking whether an older scene behaves differently."
+      - "Regression testing old Isaac Sim code."
+    avoid_if:
+      - "You are starting a new workflow."
+      - "You want the current practical default."
+    comparison_notes:
+      - "Compare against rtx_realtime_2_balanced to see why the newer renderer is preferable."
+    launch_config:
+      headless: false
+      renderer: "RaytracedLighting"
+      width: 1280
+      height: 720
+      anti_aliasing: 3
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "RaytracedLighting"
+      /rtx/post/dlss/execMode: 1
+    capture:
+      resolution: [1280, 720]
+      rt_subframes: 4
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false
+
+  rtx_realtime_2_performance:
+    family: "rtx_realtime_2"
+    user_label: "RTX Real-Time 2.0 - performance"
+    description: "Modern real-time mode, biased toward speed."
+    relative_speed: 4
+    relative_quality: 3
+    recommended_for:
+      - "Fast robotics RGB tests."
+      - "Higher-throughput synthetic-data generation."
+      - "Comparing real-time quality against the minimal renderer."
+    avoid_if:
+      - "You need the best real-time visual quality."
+      - "You are generating reference frames."
+    comparison_notes:
+      - "Should be faster than rtx_realtime_2_quality."
+      - "Should be lower quality than rtx_realtime_2_balanced and rtx_realtime_2_quality."
+    launch_config:
+      headless: false
+      renderer: "RealTimePathTracing"
+      width: 1280
+      height: 720
+      anti_aliasing: 3
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "RealTimePathTracing"
+      /rtx/post/dlss/execMode: 0
+    capture:
+      resolution: [1280, 720]
+      rt_subframes: 4
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false
+
+  rtx_realtime_2_balanced:
+    family: "rtx_realtime_2"
+    user_label: "RTX Real-Time 2.0 - balanced"
+    description: "Good default for robotics workflows and synthetic data when speed still matters."
+    relative_speed: 3
+    relative_quality: 4
+    recommended_for:
+      - "First serious renderer test."
+      - "Robotics perception experiments."
+      - "Synthetic data where speed and visual quality both matter."
+      - "Default starting point for this project."
+    avoid_if:
+      - "You need maximum still-image quality."
+      - "You only need a very fast script sanity check."
+    comparison_notes:
+      - "Use this as the main baseline."
+      - "Compare it against pathtracing_quality to decide whether path tracing is worth the cost."
+    launch_config:
+      headless: false
+      renderer: "RealTimePathTracing"
+      width: 1280
+      height: 720
+      anti_aliasing: 3
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "RealTimePathTracing"
+      /rtx/post/dlss/execMode: 1
+    capture:
+      resolution: [1280, 720]
+      rt_subframes: 8
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false
+
+  rtx_realtime_2_quality:
+    family: "rtx_realtime_2"
+    user_label: "RTX Real-Time 2.0 - quality"
+    description: "Real-time mode biased toward image quality. Often the practical best choice."
+    relative_speed: 2
+    relative_quality: 4
+    recommended_for:
+      - "Higher-quality real-time rendering."
+      - "Testing whether 1080p real-time rendering is enough."
+      - "Practical perception datasets where full path tracing is too slow."
+    avoid_if:
+      - "Your GPU cannot handle 1080p real-time rendering."
+      - "You need maximum throughput."
+    comparison_notes:
+      - "Should look better than rtx_realtime_2_performance."
+      - "Should still be faster than pathtracing_quality."
+    launch_config:
+      headless: false
+      renderer: "RealTimePathTracing"
+      width: 1920
+      height: 1080
+      anti_aliasing: 3
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "RealTimePathTracing"
+      /rtx/post/dlss/execMode: 2
+    capture:
+      resolution: [1920, 1080]
+      rt_subframes: 12
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false
+
+  pathtracing_preview:
+    family: "rtx_interactive_path_tracing"
+    user_label: "RTX Interactive Path Tracing - preview"
+    description: "Path tracing with low sample count. Use to check whether path tracing materially changes the image."
+    relative_speed: 2
+    relative_quality: 4
+    recommended_for:
+      - "Quick path-tracing comparison."
+      - "Checking whether path tracing improves lighting, shadows, reflections, or materials."
+    avoid_if:
+      - "You need a final-quality path-traced image."
+      - "You need real-time speed."
+    comparison_notes:
+      - "If this looks almost identical to rtx_realtime_2_quality, path tracing may not be worth the cost for your scene."
+      - "If this looks much better, test pathtracing_quality next."
+    launch_config:
+      headless: false
+      renderer: "PathTracing"
+      width: 1280
+      height: 720
+      anti_aliasing: 3
+      samples_per_pixel_per_frame: 16
+      denoiser: true
+      max_bounces: 4
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "PathTracing"
+      /rtx/pathtracing/spp: 16
+      /rtx/pathtracing/totalSpp: 16
+      /rtx/pathtracing/maxBounces: 4
+      /rtx/post/dlss/execMode: 2
+    capture:
+      resolution: [1280, 720]
+      rt_subframes: 16
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false
+
+  pathtracing_quality:
+    family: "rtx_interactive_path_tracing"
+    user_label: "RTX Interactive Path Tracing - quality"
+    description: "High-quality path tracing. Good still-image validation profile."
+    relative_speed: 1
+    relative_quality: 5
+    recommended_for:
+      - "High-quality visual reference."
+      - "Checking the best practical image quality."
+      - "Comparing real-time output against a stronger visual baseline."
+    avoid_if:
+      - "You need fast iteration."
+      - "You are doing closed-loop real-time robotics."
+    comparison_notes:
+      - "Use this as the main quality reference."
+      - "If this is not visibly better than rtx_realtime_2_quality, focus on assets, lighting, materials, and camera instead of renderer settings."
+    launch_config:
+      headless: false
+      renderer: "PathTracing"
+      width: 1920
+      height: 1080
+      anti_aliasing: 3
+      samples_per_pixel_per_frame: 64
+      denoiser: true
+      max_bounces: 8
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "PathTracing"
+      /rtx/pathtracing/spp: 64
+      /rtx/pathtracing/totalSpp: 64
+      /rtx/pathtracing/maxBounces: 8
+      /rtx/post/dlss/execMode: 2
+    capture:
+      resolution: [1920, 1080]
+      rt_subframes: 32
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false
+
+  pathtracing_ultra:
+    family: "rtx_interactive_path_tracing"
+    user_label: "RTX Interactive Path Tracing - ultra"
+    description: "Very slow. Use only for final-quality reference frames, not live robotics loops."
+    relative_speed: 1
+    relative_quality: 5
+    recommended_for:
+      - "Final still-frame visual inspection."
+      - "Stress-testing rendering quality."
+      - "Checking whether extra samples and resolution matter."
+    avoid_if:
+      - "You are learning the workflow."
+      - "You need fast feedback."
+      - "You are generating many frames."
+    comparison_notes:
+      - "This is deliberately expensive."
+      - "Do not use it as your default."
+      - "If it is not meaningfully better than pathtracing_quality, do not waste time with it."
+    launch_config:
+      headless: false
+      renderer: "PathTracing"
+      width: 2560
+      height: 1440
+      anti_aliasing: 3
+      samples_per_pixel_per_frame: 128
+      denoiser: true
+      max_bounces: 12
+      sync_loads: true
+    carb_settings:
+      /rtx/rendermode: "PathTracing"
+      /rtx/pathtracing/spp: 128
+      /rtx/pathtracing/totalSpp: 128
+      /rtx/pathtracing/maxBounces: 12
+      /rtx/post/dlss/execMode: 2
+    capture:
+      resolution: [2560, 1440]
+      rt_subframes: 64
+      rgb: true
+      semantic_segmentation: false
+      bounding_box_2d_tight: false

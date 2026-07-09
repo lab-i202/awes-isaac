@@ -1,0 +1,109 @@
+{
+  "profile_name": "pathtracing_quality",
+  "options": {
+    "profile_name": "pathtracing_quality",
+    "renderer": "PathTracing",
+    "width": 1920,
+    "height": 1080,
+    "resolution": [
+      1920,
+      1080
+    ],
+    "dlss_mode_name": "Quality",
+    "dlss_exec_mode": 2,
+    "rt_subframes": 32,
+    "duration_frames": 90,
+    "warmup_frames": 20,
+    "path_spp": 64,
+    "path_total_spp": 64,
+    "max_bounces": 8,
+    "headless": false,
+    "denoiser": true,
+    "rgb": true,
+    "semantic_segmentation": false,
+    "bounding_box_2d_tight": false,
+    "gpu_telemetry": true,
+    "drone_motion_radius": 1.2,
+    "drone_motion_height": 1.2,
+    "object_motion_amplitude": 1.5,
+    "camera_position": [
+      4.2,
+      -5.2,
+      2.8
+    ],
+    "camera_look_at": [
+      0.0,
+      0.0,
+      0.85
+    ],
+    "focal_length": 35.0
+  },
+  "score": {
+    "smoothness_score": 0.0,
+    "quality_score": 100.0,
+    "smoothness_label": "very low",
+    "quality_label": "high",
+    "notes": [
+      "Path tracing gives the best visual reference, but it is slow.",
+      "DLSS Quality favors image quality over speed.",
+      "High rt_subframes improves accumulation but can be slow."
+    ]
+  },
+  "launch_config": {
+    "headless": false,
+    "renderer": "PathTracing",
+    "width": 1920,
+    "height": 1080,
+    "anti_aliasing": 3,
+    "sync_loads": true,
+    "samples_per_pixel_per_frame": 64,
+    "denoiser": true,
+    "max_bounces": 8
+  },
+  "carb_settings": {
+    "/rtx/rendermode": "PathTracing",
+    "/rtx/post/dlss/execMode": 2,
+    "/rtx/pathtracing/spp": 64,
+    "/rtx/pathtracing/totalSpp": 64,
+    "/rtx/pathtracing/maxBounces": 8
+  },
+  "scene": {
+    "num_frames": 90,
+    "warmup_frames": 20,
+    "drone_motion_radius": 1.2,
+    "drone_motion_height": 1.2,
+    "object_motion_amplitude": 1.5
+  },
+  "camera": {
+    "position": [
+      4.2,
+      -5.2,
+      2.8
+    ],
+    "look_at": [
+      0.0,
+      0.0,
+      0.85
+    ],
+    "focal_length": 35.0
+  },
+  "capture": {
+    "resolution": [
+      1920,
+      1080
+    ],
+    "rt_subframes": 32,
+    "rgb": true,
+    "semantic_segmentation": false,
+    "bounding_box_2d_tight": false
+  },
+  "diagnostics": {
+    "gpu_telemetry": true,
+    "print_every_n_frames": 10,
+    "rolling_window_frames": 30
+  },
+  "output": {
+    "root": "render_outputs"
+  },
+  "saved_at_utc": "2026-07-09T13:33:04.309134+00:00"
+}
