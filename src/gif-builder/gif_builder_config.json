@@ -1,5 +1,5 @@
 {
-  "input_folder": "C:/Users/Admin/Documents/Github/awes-isaac/src/kite-isaac/outputs/tethered_glider_basic/camera_0_render_product/rgb",
+  "input_folder": "C:/Users/Admin/Documents/Github/awes-isaac/src/kite-isaac/outputs/tethered_glider_basic/camera_main",
   "output_gif": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\gif-builder\\outputs\\output_0.gif",
   "duration_ms": "20",
   "loop_count": "0",

@@ -1,7 +1,7 @@
 # utils/profile_io.py
 #
-# JSON loading, saving, validation, and small schema normalization
-# for tethered glider scene profiles.
+# JSON loading, saving, validation, and schema normalization for tethered glider
+# scene profiles.
 #
 # This module must not import Isaac Sim.
 
@@ -15,15 +15,32 @@ from pathlib import Path
 from typing import Any
 
 
+CAMERA_ORIENTATION_MODES = [
+    "look_at_target",
+    "parallel_manual",
+]
+
 DEFAULT_CAMERA_RIG = {
     "enabled": True,
-    "auto_aim_at_target": True,
+    "show_markers": True,
+    # look_at_target: Isaac/Replicator aims each camera at camera_rig.look_at.
+    #   This is easy for detection/tracking but creates toe-in stereo.
+    # parallel_manual: both cameras use explicit pitch/yaw/roll. This is better
+    #   for stereo if both cameras share orientation and only differ by baseline.
+    # Default is parallel_manual because this project will use stereo vision.
+    "orientation_mode": "parallel_manual",
     "main_camera": {
-        "position": [0.0, -12.0, 0.0],
-        "rotation_deg": [0.0, 0.0, 0.0],
+        "label": "main_camera_blue",
+        "position": [-2.5, -12.0, 1.0],
+        # GUI order: pitch, yaw, roll in degrees.
+        # This default points a parallel stereo pair roughly toward the scene
+        # center from a camera rig located at y=-12 m.
+        "rotation_deg": [2.386, 90.0, 0.0],
     },
     "secondary_camera": {
+        "label": "secondary_camera_orange",
         "position_offset": [5.0, 0.0, 0.0],
+        # Keep stereo cameras parallel by default.
         "rotation_offset_deg": [0.0, 0.0, 0.0],
     },
     "look_at": [0.0, 0.0, 1.5],
@@ -36,7 +53,16 @@ DEFAULT_CAPTURE = {
     "output_root": "outputs",
     "rgb": True,
     "rt_subframes": 1,
+    "camera_params": False,
+    # Keep BasicWriter filenames by default. Use capture_manifest.csv for time metadata.
+    # Post-renaming can be enabled manually, but it is not recommended for datasets.
+    "rename_after_capture": False,
 }
+
+
+# -----------------------------------------------------------------------------
+# File IO
+# -----------------------------------------------------------------------------
 
 
 def load_json_profile(profile_path: Path) -> dict[str, Any]:
@@ -62,6 +88,7 @@ def load_json_profile(profile_path: Path) -> dict[str, Any]:
         )
 
     normalize_profile_schema(data)
+    validate_tethered_glider_profile(data)
 
     return data
 
@@ -93,19 +120,12 @@ def sanitize_filename(value: str) -> str:
     return cleaned
 
 
+# -----------------------------------------------------------------------------
+# Schema normalization
+# -----------------------------------------------------------------------------
+
+
 def normalize_profile_schema(profile: dict[str, Any]) -> None:
-    """
-    Keep old JSON profiles usable.
-
-    Step 5 changed the camera schema from:
-      center_position + separation_axis + separation_m
-
-    to:
-      main_camera.position + secondary_camera.position_offset
-
-    This function upgrades the old format in memory.
-    """
-
     if "camera_rig" in profile and isinstance(profile["camera_rig"], dict):
         profile["camera_rig"] = normalize_camera_rig(profile["camera_rig"])
 
@@ -115,21 +135,71 @@ def normalize_profile_schema(profile: dict[str, Any]) -> None:
 
 def normalize_capture(capture: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(DEFAULT_CAPTURE)
-    normalized.update(capture)
+
+    # Backward compatibility: older profiles used timestamp_filenames.
+    # Do not carry that value forward automatically; the safer dataset default is
+    # no post-capture renaming. The new explicit key is rename_after_capture.
+    legacy_capture = copy.deepcopy(capture)
+    legacy_capture.pop("timestamp_filenames", None)
+
+    normalized.update(legacy_capture)
     return normalized
 
 
+def compute_parallel_rig_pitch_yaw_roll_deg(
+    main_position: list[float],
+    secondary_offset: list[float],
+    look_at: list[float],
+) -> list[float]:
+    """
+    Compute one visible pitch/yaw/roll value for a parallel stereo pair.
+
+    The rotation is computed from the midpoint of the stereo baseline toward
+    the look-at target, then applied to both cameras. This keeps both cameras
+    parallel while roughly aiming the rig at the glider scene.
+    """
+
+    midpoint = [
+        float(main_position[0]) + 0.5 * float(secondary_offset[0]),
+        float(main_position[1]) + 0.5 * float(secondary_offset[1]),
+        float(main_position[2]) + 0.5 * float(secondary_offset[2]),
+    ]
+
+    dx = float(look_at[0]) - midpoint[0]
+    dy = float(look_at[1]) - midpoint[1]
+    dz = float(look_at[2]) - midpoint[2]
+
+    horizontal = math.sqrt(dx * dx + dy * dy)
+    yaw_deg = 0.0 if horizontal < 1e-9 else math.degrees(math.atan2(dy, dx))
+    pitch_deg = math.degrees(math.atan2(dz, horizontal))
+
+    return [round(pitch_deg, 3), round(yaw_deg, 3), 0.0]
+
+
+def is_zero_vector3(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 3
+        and all(isinstance(item, (int, float)) and abs(float(item)) < 1e-12 for item in value)
+    )
+
+
 def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
-    # New schema already present.
+    # Convert the previous boolean auto-aim field into an explicit mode.
+    if "orientation_mode" not in camera_rig and "auto_aim_at_target" in camera_rig:
+        camera_rig = copy.deepcopy(camera_rig)
+        camera_rig["orientation_mode"] = (
+            "look_at_target" if camera_rig.get("auto_aim_at_target", True) else "parallel_manual"
+        )
+
+    # New schema.
     if "main_camera" in camera_rig or "secondary_camera" in camera_rig:
         normalized = copy.deepcopy(DEFAULT_CAMERA_RIG)
 
         normalized["enabled"] = bool(camera_rig.get("enabled", normalized["enabled"]))
-        normalized["auto_aim_at_target"] = bool(
-            camera_rig.get(
-                "auto_aim_at_target",
-                normalized["auto_aim_at_target"],
-            )
+        normalized["show_markers"] = bool(camera_rig.get("show_markers", normalized["show_markers"]))
+        normalized["orientation_mode"] = str(
+            camera_rig.get("orientation_mode", normalized["orientation_mode"])
         )
 
         if isinstance(camera_rig.get("main_camera"), dict):
@@ -147,10 +217,24 @@ def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
         if "resolution" in camera_rig:
             normalized["resolution"] = camera_rig["resolution"]
 
+        # Make old parallel_manual profiles usable: if all manual rotations are
+        # still zero, initialize the main camera yaw/pitch visibly in the GUI.
+        # This is not hidden auto-aim; the values are written into the profile.
+        if (
+            normalized["orientation_mode"] == "parallel_manual"
+            and is_zero_vector3(normalized["main_camera"].get("rotation_deg"))
+            and is_zero_vector3(normalized["secondary_camera"].get("rotation_offset_deg"))
+        ):
+            normalized["main_camera"]["rotation_deg"] = compute_parallel_rig_pitch_yaw_roll_deg(
+                normalized["main_camera"]["position"],
+                normalized["secondary_camera"]["position_offset"],
+                normalized["look_at"],
+            )
+            normalized["secondary_camera"]["rotation_offset_deg"] = [0.0, 0.0, 0.0]
+
         return normalized
 
-    # Legacy Step 5 schema:
-    # center_position + separation_axis + separation_m.
+    # Legacy schema from the center/separation-axis version.
     if (
         "center_position" in camera_rig
         and "separation_axis" in camera_rig
@@ -188,9 +272,16 @@ def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
 
         normalized = copy.deepcopy(DEFAULT_CAMERA_RIG)
         normalized["enabled"] = bool(camera_rig.get("enabled", True))
-        normalized["auto_aim_at_target"] = True
+        normalized["show_markers"] = bool(camera_rig.get("show_markers", True))
+        normalized["orientation_mode"] = "parallel_manual"
         normalized["main_camera"]["position"] = main_position
         normalized["secondary_camera"]["position_offset"] = secondary_offset
+        normalized["main_camera"]["rotation_deg"] = compute_parallel_rig_pitch_yaw_roll_deg(
+            main_position,
+            secondary_offset,
+            normalized["look_at"],
+        )
+        normalized["secondary_camera"]["rotation_offset_deg"] = [0.0, 0.0, 0.0]
 
         if "look_at" in camera_rig:
             normalized["look_at"] = camera_rig["look_at"]
@@ -204,6 +295,11 @@ def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
         return normalized
 
     return copy.deepcopy(DEFAULT_CAMERA_RIG)
+
+
+# -----------------------------------------------------------------------------
+# Validation
+# -----------------------------------------------------------------------------
 
 
 def validate_tethered_glider_profile(profile: dict[str, Any]) -> None:
@@ -276,7 +372,8 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
 
     required_keys = [
         "enabled",
-        "auto_aim_at_target",
+        "show_markers",
+        "orientation_mode",
         "main_camera",
         "secondary_camera",
         "look_at",
@@ -291,8 +388,14 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
     if not isinstance(camera_rig["enabled"], bool):
         raise ValueError("camera_rig.enabled must be true or false.")
 
-    if not isinstance(camera_rig["auto_aim_at_target"], bool):
-        raise ValueError("camera_rig.auto_aim_at_target must be true or false.")
+    if not isinstance(camera_rig["show_markers"], bool):
+        raise ValueError("camera_rig.show_markers must be true or false.")
+
+    if camera_rig["orientation_mode"] not in CAMERA_ORIENTATION_MODES:
+        raise ValueError(
+            "camera_rig.orientation_mode must be one of: "
+            + ", ".join(CAMERA_ORIENTATION_MODES)
+        )
 
     main_camera = camera_rig["main_camera"]
     secondary_camera = camera_rig["secondary_camera"]
@@ -354,6 +457,8 @@ def validate_capture(capture: dict[str, Any]) -> None:
         "output_root",
         "rgb",
         "rt_subframes",
+        "camera_params",
+        "rename_after_capture",
     ]
 
     for key in required_keys:
@@ -372,6 +477,12 @@ def validate_capture(capture: dict[str, Any]) -> None:
     if not isinstance(capture["rgb"], bool):
         raise ValueError("capture.rgb must be true or false.")
 
+    if not isinstance(capture["camera_params"], bool):
+        raise ValueError("capture.camera_params must be true or false.")
+
+    if not isinstance(capture["rename_after_capture"], bool):
+        raise ValueError("capture.rename_after_capture must be true or false.")
+
     if not isinstance(capture["rt_subframes"], int) or isinstance(
         capture["rt_subframes"],
         bool,
@@ -380,6 +491,11 @@ def validate_capture(capture: dict[str, Any]) -> None:
 
     if capture["rt_subframes"] <= 0:
         raise ValueError("capture.rt_subframes must be greater than zero.")
+
+
+# -----------------------------------------------------------------------------
+# Internal validators
+# -----------------------------------------------------------------------------
 
 
 def _validate_vector3(value: Any, name: str) -> None:
