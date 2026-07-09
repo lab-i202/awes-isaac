@@ -1,0 +1,830 @@
+# gui/scene_profile_gui.py
+#
+# Scrollable GUI for editing tethered glider scene JSON profiles.
+#
+# Fix:
+#   - Each tab is scrollable.
+#   - Load / Save / Run / Cancel buttons stay visible at the bottom.
+#   - Window height is reduced so it fits better on normal screens.
+#
+# This file must not import Isaac Sim.
+# The GUI runs first. Isaac Sim starts only after the GUI closes.
+
+from __future__ import annotations
+
+import shutil
+import tkinter as tk
+from pathlib import Path
+from tkinter import filedialog, messagebox, ttk
+from typing import Any
+
+from utils.profile_io import (
+    DEFAULT_CAMERA_RIG,
+    DEFAULT_CAPTURE,
+    default_profile_path,
+    load_json_profile,
+    normalize_camera_rig,
+    sanitize_filename,
+    save_json_profile,
+    validate_tethered_glider_profile,
+)
+
+
+class ScrollableFrame(ttk.Frame):
+    """
+    A reusable vertical scroll container.
+
+    Use:
+        scrollable = ScrollableFrame(parent)
+        content = scrollable.content
+        # add widgets to content
+    """
+
+    def __init__(self, parent: tk.Widget):
+        super().__init__(parent)
+
+        self.canvas = tk.Canvas(self, highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(
+            self,
+            orient="vertical",
+            command=self.canvas.yview,
+        )
+
+        self.content = ttk.Frame(self.canvas)
+
+        self.content_window = self.canvas.create_window(
+            (0, 0),
+            window=self.content,
+            anchor="nw",
+        )
+
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        self.content.bind("<Configure>", self._on_content_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+        self.canvas.bind("<Enter>", self._bind_mousewheel)
+        self.canvas.bind("<Leave>", self._unbind_mousewheel)
+
+    def _on_content_configure(self, _event: tk.Event) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event: tk.Event) -> None:
+        self.canvas.itemconfigure(self.content_window, width=event.width)
+
+    def _bind_mousewheel(self, _event: tk.Event) -> None:
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel_linux)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel_linux)
+
+    def _unbind_mousewheel(self, _event: tk.Event) -> None:
+        self.canvas.unbind_all("<MouseWheel>")
+        self.canvas.unbind_all("<Button-4>")
+        self.canvas.unbind_all("<Button-5>")
+
+    def _on_mousewheel(self, event: tk.Event) -> None:
+        # Windows/macOS style mouse wheel.
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def _on_mousewheel_linux(self, event: tk.Event) -> None:
+        # Linux X11 style mouse wheel.
+        if event.num == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif event.num == 5:
+            self.canvas.yview_scroll(1, "units")
+
+
+class SceneProfileGui:
+    def __init__(self, project_root: Path, initial_profile_path: Path):
+        self.project_root = project_root
+        self.initial_profile_path = initial_profile_path
+        self.current_profile_path = initial_profile_path
+        self.result: dict[str, Any] | None = None
+
+        self.root = tk.Tk()
+        self.root.title("Tethered Glider Scene Profile")
+        self.root.geometry("760x680")
+        self.root.minsize(720, 560)
+
+        self._build_variables()
+        self._build_layout()
+
+        profile = load_json_profile(initial_profile_path)
+        validate_tethered_glider_profile(profile)
+        self._load_profile_into_gui(profile)
+
+    def run(self) -> dict[str, Any] | None:
+        self.root.mainloop()
+        return self.result
+
+    def _build_variables(self) -> None:
+        self.scene_name = tk.StringVar()
+
+        self.anchor_x = tk.DoubleVar()
+        self.anchor_y = tk.DoubleVar()
+        self.anchor_z = tk.DoubleVar()
+
+        self.tether_length_m = tk.DoubleVar()
+        self.glider_height_m = tk.DoubleVar()
+        self.angular_velocity_rad_s = tk.DoubleVar()
+
+        self.num_frames = tk.IntVar()
+        self.time_step_s = tk.DoubleVar()
+
+        self.wingspan_m = tk.DoubleVar()
+        self.length_m = tk.DoubleVar()
+        self.body_width_m = tk.DoubleVar()
+        self.body_height_m = tk.DoubleVar()
+        self.wing_chord_m = tk.DoubleVar()
+        self.wing_thickness_m = tk.DoubleVar()
+
+        self.camera_enabled = tk.BooleanVar()
+        self.camera_auto_aim = tk.BooleanVar()
+
+        self.main_camera_x = tk.DoubleVar()
+        self.main_camera_y = tk.DoubleVar()
+        self.main_camera_z = tk.DoubleVar()
+
+        self.main_pitch_deg = tk.DoubleVar()
+        self.main_yaw_deg = tk.DoubleVar()
+        self.main_roll_deg = tk.DoubleVar()
+
+        self.secondary_offset_x = tk.DoubleVar()
+        self.secondary_offset_y = tk.DoubleVar()
+        self.secondary_offset_z = tk.DoubleVar()
+
+        self.secondary_pitch_offset_deg = tk.DoubleVar()
+        self.secondary_yaw_offset_deg = tk.DoubleVar()
+        self.secondary_roll_offset_deg = tk.DoubleVar()
+
+        self.camera_look_x = tk.DoubleVar()
+        self.camera_look_y = tk.DoubleVar()
+        self.camera_look_z = tk.DoubleVar()
+
+        self.camera_focal_length = tk.DoubleVar()
+        self.camera_resolution_width = tk.IntVar()
+        self.camera_resolution_height = tk.IntVar()
+
+        self.capture_enabled = tk.BooleanVar()
+        self.capture_output_root = tk.StringVar()
+        self.capture_rgb = tk.BooleanVar()
+        self.capture_rt_subframes = tk.IntVar()
+
+        self.status_text = tk.StringVar()
+
+    def _build_layout(self) -> None:
+        main = ttk.Frame(self.root, padding=10)
+        main.pack(fill="both", expand=True)
+
+        title = ttk.Label(
+            main,
+            text="Tethered Glider Scene Profile",
+            font=("Segoe UI", 15, "bold"),
+        )
+        title.pack(anchor="w", pady=(0, 4))
+
+        description = ttk.Label(
+            main,
+            text=(
+                "Edit scene, glider, camera, and capture parameters. "
+                "Tabs scroll. Buttons stay fixed at the bottom."
+            ),
+            wraplength=700,
+        )
+        description.pack(anchor="w", pady=(0, 8))
+
+        bottom_panel = ttk.Frame(main)
+        bottom_panel.pack(side="bottom", fill="x", pady=(8, 0))
+
+        status = ttk.Label(
+            bottom_panel,
+            textvariable=self.status_text,
+            wraplength=700,
+            foreground="gray",
+        )
+        status.pack(anchor="w", pady=(0, 8))
+
+        buttons = ttk.Frame(bottom_panel)
+        buttons.pack(fill="x")
+
+        ttk.Button(buttons, text="Load JSON", command=self._on_load).pack(side="left")
+        ttk.Button(buttons, text="Save JSON", command=self._on_save).pack(
+            side="left",
+            padx=(8, 0),
+        )
+
+        ttk.Button(buttons, text="Run Isaac Sim", command=self._on_run).pack(
+            side="right",
+        )
+        ttk.Button(buttons, text="Cancel", command=self._on_cancel).pack(
+            side="right",
+            padx=(0, 8),
+        )
+
+        notebook = ttk.Notebook(main)
+        notebook.pack(side="top", fill="both", expand=True)
+
+        scene_scroll = ScrollableFrame(notebook)
+        glider_scroll = ScrollableFrame(notebook)
+        camera_scroll = ScrollableFrame(notebook)
+        capture_scroll = ScrollableFrame(notebook)
+
+        notebook.add(scene_scroll, text="Scene")
+        notebook.add(glider_scroll, text="Glider")
+        notebook.add(camera_scroll, text="Cameras")
+        notebook.add(capture_scroll, text="Capture")
+
+        self._build_scene_tab(scene_scroll.content)
+        self._build_glider_tab(glider_scroll.content)
+        self._build_camera_tab(camera_scroll.content)
+        self._build_capture_tab(capture_scroll.content)
+
+    def _build_scene_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=12)
+        row = 0
+
+        ttk.Label(parent, text="Scene name").grid(row=row, column=0, sticky="w")
+        ttk.Entry(parent, textvariable=self.scene_name, width=36).grid(
+            row=row,
+            column=1,
+            sticky="ew",
+            padx=8,
+            pady=4,
+        )
+        row += 1
+
+        ttk.Separator(parent).grid(
+            row=row,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=10,
+        )
+        row += 1
+
+        self._add_float_row(parent, row, "Anchor X [m]", self.anchor_x)
+        row += 1
+        self._add_float_row(parent, row, "Anchor Y [m]", self.anchor_y)
+        row += 1
+        self._add_float_row(parent, row, "Anchor Z [m]", self.anchor_z)
+        row += 1
+
+        ttk.Separator(parent).grid(
+            row=row,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=10,
+        )
+        row += 1
+
+        self._add_float_row(parent, row, "Tether length [m]", self.tether_length_m)
+        row += 1
+        self._add_float_row(parent, row, "Glider height [m]", self.glider_height_m)
+        row += 1
+        self._add_float_row(
+            parent,
+            row,
+            "Angular velocity [rad/s]",
+            self.angular_velocity_rad_s,
+        )
+        row += 1
+
+        ttk.Separator(parent).grid(
+            row=row,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=10,
+        )
+        row += 1
+
+        self._add_int_row(parent, row, "Number of frames", self.num_frames)
+        row += 1
+        self._add_float_row(parent, row, "Time step [s]", self.time_step_s)
+
+        parent.columnconfigure(1, weight=1)
+
+    def _build_glider_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=12)
+        row = 0
+
+        self._add_float_row(parent, row, "Wingspan [m]", self.wingspan_m)
+        row += 1
+        self._add_float_row(parent, row, "Length [m]", self.length_m)
+        row += 1
+        self._add_float_row(parent, row, "Body width [m]", self.body_width_m)
+        row += 1
+        self._add_float_row(parent, row, "Body height [m]", self.body_height_m)
+        row += 1
+        self._add_float_row(parent, row, "Wing chord [m]", self.wing_chord_m)
+        row += 1
+        self._add_float_row(parent, row, "Wing thickness [m]", self.wing_thickness_m)
+
+        parent.columnconfigure(1, weight=1)
+
+    def _build_camera_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=12)
+        row = 0
+
+        ttk.Checkbutton(
+            parent,
+            text="Enable two-camera rig",
+            variable=self.camera_enabled,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        row += 1
+
+        ttk.Checkbutton(
+            parent,
+            text="Auto-aim both cameras at look-at target",
+            variable=self.camera_auto_aim,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "Recommended: keep auto-aim enabled. "
+                "Pitch/yaw/roll are saved and used only when auto-aim is disabled."
+            ),
+            wraplength=680,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        row += 1
+
+        ttk.Label(
+            parent,
+            text="Main camera",
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        row += 1
+
+        self._add_float_row(parent, row, "Main camera X [m]", self.main_camera_x)
+        row += 1
+        self._add_float_row(parent, row, "Main camera Y [m]", self.main_camera_y)
+        row += 1
+        self._add_float_row(parent, row, "Main camera Z [m]", self.main_camera_z)
+        row += 1
+
+        self._add_float_row(parent, row, "Main pitch [deg]", self.main_pitch_deg)
+        row += 1
+        self._add_float_row(parent, row, "Main yaw [deg]", self.main_yaw_deg)
+        row += 1
+        self._add_float_row(parent, row, "Main roll [deg]", self.main_roll_deg)
+        row += 1
+
+        ttk.Separator(parent).grid(
+            row=row,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=10,
+        )
+        row += 1
+
+        ttk.Label(
+            parent,
+            text="Secondary camera offset relative to main camera",
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        row += 1
+
+        self._add_float_row(parent, row, "Secondary X offset [m]", self.secondary_offset_x)
+        row += 1
+        self._add_float_row(parent, row, "Secondary Y offset [m]", self.secondary_offset_y)
+        row += 1
+        self._add_float_row(parent, row, "Secondary Z offset [m]", self.secondary_offset_z)
+        row += 1
+
+        self._add_float_row(
+            parent,
+            row,
+            "Secondary pitch offset [deg]",
+            self.secondary_pitch_offset_deg,
+        )
+        row += 1
+        self._add_float_row(
+            parent,
+            row,
+            "Secondary yaw offset [deg]",
+            self.secondary_yaw_offset_deg,
+        )
+        row += 1
+        self._add_float_row(
+            parent,
+            row,
+            "Secondary roll offset [deg]",
+            self.secondary_roll_offset_deg,
+        )
+        row += 1
+
+        ttk.Separator(parent).grid(
+            row=row,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=10,
+        )
+        row += 1
+
+        ttk.Label(
+            parent,
+            text="Look-at target and optics",
+            font=("Segoe UI", 10, "bold"),
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        row += 1
+
+        self._add_float_row(parent, row, "Look-at X [m]", self.camera_look_x)
+        row += 1
+        self._add_float_row(parent, row, "Look-at Y [m]", self.camera_look_y)
+        row += 1
+        self._add_float_row(parent, row, "Look-at Z [m]", self.camera_look_z)
+        row += 1
+
+        self._add_float_row(parent, row, "Focal length", self.camera_focal_length)
+        row += 1
+
+        self._add_int_row(parent, row, "Resolution width", self.camera_resolution_width)
+        row += 1
+        self._add_int_row(parent, row, "Resolution height", self.camera_resolution_height)
+
+        parent.columnconfigure(1, weight=1)
+
+    def _build_capture_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=12)
+        row = 0
+
+        ttk.Checkbutton(
+            parent,
+            text="Enable RGB capture",
+            variable=self.capture_enabled,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+
+        ttk.Checkbutton(
+            parent,
+            text="RGB",
+            variable=self.capture_rgb,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+
+        ttk.Label(parent, text="Output root folder").grid(row=row, column=0, sticky="w")
+        ttk.Entry(parent, textvariable=self.capture_output_root, width=36).grid(
+            row=row,
+            column=1,
+            sticky="ew",
+            padx=8,
+            pady=4,
+        )
+        row += 1
+
+        self._add_int_row(parent, row, "RT subframes", self.capture_rt_subframes)
+        row += 1
+
+        ttk.Button(
+            parent,
+            text="Check / Delete Output Folder",
+            command=self._on_check_delete_output_folder,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(14, 8))
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "This checks the folder used for the current scene. "
+                "Delete it before running if you do not want old frames mixed with new frames."
+            ),
+            wraplength=680,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+
+        parent.columnconfigure(1, weight=1)
+
+    def _add_float_row(
+        self,
+        parent: ttk.Frame,
+        row: int,
+        label: str,
+        variable: tk.DoubleVar,
+    ) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
+
+        spinbox = ttk.Spinbox(
+            parent,
+            from_=-10000.0,
+            to=10000.0,
+            increment=0.1,
+            textvariable=variable,
+            width=16,
+        )
+        spinbox.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+
+    def _add_int_row(
+        self,
+        parent: ttk.Frame,
+        row: int,
+        label: str,
+        variable: tk.IntVar,
+    ) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
+
+        spinbox = ttk.Spinbox(
+            parent,
+            from_=1,
+            to=1000000,
+            increment=1,
+            textvariable=variable,
+            width=16,
+        )
+        spinbox.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+
+    def _load_profile_into_gui(self, profile: dict[str, Any]) -> None:
+        glider = profile["glider"]
+        camera_rig = normalize_camera_rig(profile.get("camera_rig", DEFAULT_CAMERA_RIG))
+        capture = profile.get("capture", DEFAULT_CAPTURE)
+
+        self.scene_name.set(str(profile["scene_name"]))
+
+        anchor = profile["anchor_position"]
+        self.anchor_x.set(float(anchor[0]))
+        self.anchor_y.set(float(anchor[1]))
+        self.anchor_z.set(float(anchor[2]))
+
+        self.tether_length_m.set(float(profile["tether_length_m"]))
+        self.glider_height_m.set(float(profile["glider_height_m"]))
+        self.angular_velocity_rad_s.set(float(profile["angular_velocity_rad_s"]))
+
+        self.num_frames.set(int(profile["num_frames"]))
+        self.time_step_s.set(float(profile["time_step_s"]))
+
+        self.wingspan_m.set(float(glider["wingspan_m"]))
+        self.length_m.set(float(glider["length_m"]))
+        self.body_width_m.set(float(glider["body_width_m"]))
+        self.body_height_m.set(float(glider["body_height_m"]))
+        self.wing_chord_m.set(float(glider["wing_chord_m"]))
+        self.wing_thickness_m.set(float(glider["wing_thickness_m"]))
+
+        self.camera_enabled.set(bool(camera_rig["enabled"]))
+        self.camera_auto_aim.set(bool(camera_rig["auto_aim_at_target"]))
+
+        main_camera = camera_rig["main_camera"]
+        secondary_camera = camera_rig["secondary_camera"]
+
+        main_position = main_camera["position"]
+        main_rotation = main_camera["rotation_deg"]
+
+        self.main_camera_x.set(float(main_position[0]))
+        self.main_camera_y.set(float(main_position[1]))
+        self.main_camera_z.set(float(main_position[2]))
+
+        self.main_pitch_deg.set(float(main_rotation[0]))
+        self.main_yaw_deg.set(float(main_rotation[1]))
+        self.main_roll_deg.set(float(main_rotation[2]))
+
+        secondary_position_offset = secondary_camera["position_offset"]
+        secondary_rotation_offset = secondary_camera["rotation_offset_deg"]
+
+        self.secondary_offset_x.set(float(secondary_position_offset[0]))
+        self.secondary_offset_y.set(float(secondary_position_offset[1]))
+        self.secondary_offset_z.set(float(secondary_position_offset[2]))
+
+        self.secondary_pitch_offset_deg.set(float(secondary_rotation_offset[0]))
+        self.secondary_yaw_offset_deg.set(float(secondary_rotation_offset[1]))
+        self.secondary_roll_offset_deg.set(float(secondary_rotation_offset[2]))
+
+        look_at = camera_rig["look_at"]
+        resolution = camera_rig["resolution"]
+
+        self.camera_look_x.set(float(look_at[0]))
+        self.camera_look_y.set(float(look_at[1]))
+        self.camera_look_z.set(float(look_at[2]))
+
+        self.camera_focal_length.set(float(camera_rig["focal_length"]))
+
+        self.camera_resolution_width.set(int(resolution[0]))
+        self.camera_resolution_height.set(int(resolution[1]))
+
+        self.capture_enabled.set(bool(capture.get("enabled", True)))
+        self.capture_output_root.set(str(capture.get("output_root", "outputs")))
+        self.capture_rgb.set(bool(capture.get("rgb", True)))
+        self.capture_rt_subframes.set(int(capture.get("rt_subframes", 1)))
+
+        self.status_text.set(f"Loaded: {self.current_profile_path}")
+
+    def _collect_profile_from_gui(self) -> dict[str, Any]:
+        profile = {
+            "scene_name": self.scene_name.get().strip(),
+            "anchor_position": [
+                float(self.anchor_x.get()),
+                float(self.anchor_y.get()),
+                float(self.anchor_z.get()),
+            ],
+            "tether_length_m": float(self.tether_length_m.get()),
+            "glider_height_m": float(self.glider_height_m.get()),
+            "angular_velocity_rad_s": float(self.angular_velocity_rad_s.get()),
+            "num_frames": int(self.num_frames.get()),
+            "time_step_s": float(self.time_step_s.get()),
+            "glider": {
+                "wingspan_m": float(self.wingspan_m.get()),
+                "length_m": float(self.length_m.get()),
+                "body_width_m": float(self.body_width_m.get()),
+                "body_height_m": float(self.body_height_m.get()),
+                "wing_chord_m": float(self.wing_chord_m.get()),
+                "wing_thickness_m": float(self.wing_thickness_m.get()),
+            },
+            "camera_rig": {
+                "enabled": bool(self.camera_enabled.get()),
+                "auto_aim_at_target": bool(self.camera_auto_aim.get()),
+                "main_camera": {
+                    "position": [
+                        float(self.main_camera_x.get()),
+                        float(self.main_camera_y.get()),
+                        float(self.main_camera_z.get()),
+                    ],
+                    "rotation_deg": [
+                        float(self.main_pitch_deg.get()),
+                        float(self.main_yaw_deg.get()),
+                        float(self.main_roll_deg.get()),
+                    ],
+                },
+                "secondary_camera": {
+                    "position_offset": [
+                        float(self.secondary_offset_x.get()),
+                        float(self.secondary_offset_y.get()),
+                        float(self.secondary_offset_z.get()),
+                    ],
+                    "rotation_offset_deg": [
+                        float(self.secondary_pitch_offset_deg.get()),
+                        float(self.secondary_yaw_offset_deg.get()),
+                        float(self.secondary_roll_offset_deg.get()),
+                    ],
+                },
+                "look_at": [
+                    float(self.camera_look_x.get()),
+                    float(self.camera_look_y.get()),
+                    float(self.camera_look_z.get()),
+                ],
+                "focal_length": float(self.camera_focal_length.get()),
+                "resolution": [
+                    int(self.camera_resolution_width.get()),
+                    int(self.camera_resolution_height.get()),
+                ],
+            },
+            "capture": {
+                "enabled": bool(self.capture_enabled.get()),
+                "output_root": self.capture_output_root.get().strip(),
+                "rgb": bool(self.capture_rgb.get()),
+                "rt_subframes": int(self.capture_rt_subframes.get()),
+            },
+            "future_wind": {
+                "enabled": False,
+                "mean_velocity_m_s": [0.0, 0.0, 0.0],
+                "noise_std_m_s": 0.0,
+                "note": "Reserved for later. Do not use yet.",
+            },
+        }
+
+        validate_tethered_glider_profile(profile)
+
+        return profile
+
+    def _get_output_dir_from_gui(self) -> Path:
+        scene_name = self.scene_name.get().strip()
+        output_root_text = self.capture_output_root.get().strip()
+
+        if not scene_name:
+            raise ValueError("Scene name cannot be empty.")
+
+        if not output_root_text:
+            raise ValueError("Output root folder cannot be empty.")
+
+        output_root = Path(output_root_text)
+
+        if not output_root.is_absolute():
+            output_root = self.project_root / output_root
+
+        output_dir = output_root / sanitize_filename(scene_name)
+
+        return output_dir.resolve()
+
+    def _on_check_delete_output_folder(self) -> None:
+        try:
+            output_dir = self._get_output_dir_from_gui()
+
+            if not output_dir.exists():
+                messagebox.showinfo(
+                    "Output folder check",
+                    f"Folder does not exist yet:\n{output_dir}",
+                )
+                return
+
+            if not output_dir.is_dir():
+                messagebox.showerror(
+                    "Output folder check",
+                    f"Path exists but is not a folder:\n{output_dir}",
+                )
+                return
+
+            delete = messagebox.askyesno(
+                "Delete output folder?",
+                (
+                    "Output folder already exists:\n\n"
+                    f"{output_dir}\n\n"
+                    "Delete it now?\n\n"
+                    "This permanently removes existing captured frames "
+                    "inside that folder."
+                ),
+            )
+
+            if not delete:
+                self.status_text.set(f"Output folder kept: {output_dir}")
+                return
+
+            shutil.rmtree(output_dir)
+
+            self.status_text.set(f"Deleted output folder: {output_dir}")
+            messagebox.showinfo(
+                "Deleted",
+                f"Deleted output folder:\n{output_dir}",
+            )
+
+        except Exception as exc:
+            messagebox.showerror("Output folder check failed", str(exc))
+
+    def _on_load(self) -> None:
+        selected_path = filedialog.askopenfilename(
+            title="Load tethered glider JSON profile",
+            initialdir=str(self.project_root / "profiles"),
+            filetypes=[
+                ("JSON files", "*.json"),
+                ("All files", "*.*"),
+            ],
+        )
+
+        if not selected_path:
+            return
+
+        try:
+            profile_path = Path(selected_path).resolve()
+            profile = load_json_profile(profile_path)
+            validate_tethered_glider_profile(profile)
+
+            self.current_profile_path = profile_path
+            self._load_profile_into_gui(profile)
+
+        except Exception as exc:
+            messagebox.showerror("Load failed", str(exc))
+
+    def _on_save(self) -> None:
+        try:
+            profile = self._collect_profile_from_gui()
+            profile_path = default_profile_path(
+                project_root=self.project_root,
+                scene_name=profile["scene_name"],
+            )
+            save_json_profile(profile_path, profile)
+
+            self.current_profile_path = profile_path
+            self.status_text.set(f"Saved: {profile_path}")
+            messagebox.showinfo("Saved", f"Profile saved:\n{profile_path}")
+
+        except Exception as exc:
+            messagebox.showerror("Save failed", str(exc))
+
+    def _on_run(self) -> None:
+        try:
+            profile = self._collect_profile_from_gui()
+            profile_path = default_profile_path(
+                project_root=self.project_root,
+                scene_name=profile["scene_name"],
+            )
+            save_json_profile(profile_path, profile)
+
+            self.result = {
+                "run_requested": True,
+                "profile": profile,
+                "profile_path": profile_path,
+            }
+
+            self.root.destroy()
+
+        except Exception as exc:
+            messagebox.showerror("Run failed", str(exc))
+
+    def _on_cancel(self) -> None:
+        self.result = None
+        self.root.destroy()
+
+
+def run_scene_profile_gui(
+    project_root: Path,
+    initial_profile_path: Path,
+) -> dict[str, Any] | None:
+    gui = SceneProfileGui(
+        project_root=project_root,
+        initial_profile_path=initial_profile_path,
+    )
+    return gui.run()

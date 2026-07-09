@@ -1,6 +1,6 @@
 # scenario/tethered_glider_scene.py
 #
-# Minimal kinematic tethered-glider scene.
+# Kinematic tethered-glider scene with optional two-camera RGB capture.
 #
 # This is intentionally not aerodynamic.
 # This is intentionally not a cable-physics simulation.
@@ -12,11 +12,17 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 from typing import Any
 
 import carb
 import omni.usd
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
+
+from utils.profile_io import normalize_camera_rig, sanitize_filename
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_tethered_glider_scene(
@@ -32,10 +38,33 @@ def run_tethered_glider_scene(
 
     configure_renderer()
     create_lights(stage)
-    create_ground(stage)
+    create_environment(stage)
     create_anchor(stage, scene_config)
     create_tether_curve(stage)
     create_proxy_glider(stage, scene_config)
+
+    capture_cfg = scene_config.get("capture", {})
+    camera_rig_cfg = normalize_camera_rig(scene_config.get("camera_rig", {}))
+
+    capture_enabled = bool(capture_cfg.get("enabled", False))
+    camera_enabled = bool(camera_rig_cfg.get("enabled", False))
+
+    if camera_enabled:
+        create_camera_markers(stage, camera_rig_cfg)
+
+    rep = None
+    render_products = []
+    writer = None
+
+    if capture_enabled and camera_enabled:
+        import omni.replicator.core as rep_module
+
+        rep = rep_module
+        render_products, writer = create_two_camera_capture(
+            rep=rep,
+            scene_config=scene_config,
+            camera_rig_cfg=camera_rig_cfg,
+        )
 
     num_frames = int(scene_config["num_frames"])
     time_step_s = float(scene_config["time_step_s"])
@@ -49,35 +78,64 @@ def run_tethered_glider_scene(
     print(f"Angular velocity: {scene_config['angular_velocity_rad_s']} rad/s")
     print(f"Frames: {num_frames}")
     print(f"Time step: {time_step_s} s")
+    print(f"Camera rig enabled: {camera_enabled}")
+    print(f"Capture enabled: {capture_enabled}")
+
+    if capture_enabled and camera_enabled:
+        camera_defs = compute_two_camera_definitions(camera_rig_cfg)
+
+        print(f"Camera auto-aim: {camera_rig_cfg['auto_aim_at_target']}")
+        print(f"Camera look_at: {camera_rig_cfg['look_at']}")
+        print(f"Main camera position: {camera_defs[0]['position']}")
+        print(f"Secondary camera position: {camera_defs[1]['position']}")
+        print(f"Secondary camera position offset: {camera_rig_cfg['secondary_camera']['position_offset']}")
+        print(f"Capture output root: {capture_cfg['output_root']}")
+        print(f"RT subframes: {capture_cfg['rt_subframes']}")
+
     print("=" * 100)
 
-    for frame_index in range(num_frames):
-        sim_time_s = frame_index * time_step_s
+    try:
+        for frame_index in range(num_frames):
+            sim_time_s = frame_index * time_step_s
 
-        update_tethered_glider_motion(
-            stage=stage,
-            scene_config=scene_config,
-            sim_time_s=sim_time_s,
-        )
-
-        simulation_app.update()
-
-        if frame_index % 60 == 0:
-            glider_position = compute_glider_position(scene_config, sim_time_s)
-            constraint_error = compute_tether_constraint_error(
+            update_tethered_glider_motion(
+                stage=stage,
                 scene_config=scene_config,
-                glider_position=glider_position,
+                sim_time_s=sim_time_s,
             )
 
-            print(
-                f"[frame {frame_index:04d}] "
-                f"t={sim_time_s:.2f}s "
-                f"glider_pos=({glider_position[0]:.3f}, "
-                f"{glider_position[1]:.3f}, "
-                f"{glider_position[2]:.3f}) "
-                f"constraint_error={constraint_error:.6f} m",
-                flush=True,
-            )
+            simulation_app.update()
+
+            if capture_enabled and camera_enabled and rep is not None:
+                rep.orchestrator.step(
+                    rt_subframes=int(capture_cfg.get("rt_subframes", 1)),
+                    pause_timeline=True,
+                    delta_time=0.0,
+                    wait_for_render=True,
+                )
+
+            if frame_index % 60 == 0:
+                glider_position = compute_glider_position(scene_config, sim_time_s)
+                constraint_error = compute_tether_constraint_error(
+                    scene_config=scene_config,
+                    glider_position=glider_position,
+                )
+
+                print(
+                    f"[frame {frame_index:04d}] "
+                    f"t={sim_time_s:.2f}s "
+                    f"glider_pos=({glider_position[0]:.3f}, "
+                    f"{glider_position[1]:.3f}, "
+                    f"{glider_position[2]:.3f}) "
+                    f"constraint_error={constraint_error:.6f} m",
+                    flush=True,
+                )
+
+        if capture_enabled and camera_enabled and rep is not None:
+            rep.orchestrator.wait_until_complete()
+
+    finally:
+        cleanup_capture(render_products=render_products, writer=writer)
 
     print("Simulation finished.")
 
@@ -101,11 +159,169 @@ def configure_renderer() -> None:
     settings.set("/rtx/post/dlss/execMode", 1)
 
 
+def create_two_camera_capture(
+    rep: Any,
+    scene_config: dict[str, Any],
+    camera_rig_cfg: dict[str, Any],
+) -> tuple[list[Any], Any]:
+    capture_cfg = scene_config["capture"]
+
+    output_root = PROJECT_ROOT / capture_cfg.get("output_root", "outputs")
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    scene_dir_name = sanitize_filename(str(scene_config["scene_name"]))
+    output_dir = output_root / scene_dir_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    settings = carb.settings.get_settings()
+    settings.set("/omni/replicator/backends/disk/root_dir", str(output_root.resolve()))
+
+    camera_defs = compute_two_camera_definitions(camera_rig_cfg)
+
+    look_at = tuple(float(value) for value in camera_rig_cfg["look_at"])
+    focal_length = float(camera_rig_cfg["focal_length"])
+    resolution = tuple(int(value) for value in camera_rig_cfg["resolution"])
+    auto_aim = bool(camera_rig_cfg["auto_aim_at_target"])
+
+    cameras = []
+
+    for camera_def in camera_defs:
+        if auto_aim:
+            camera = rep.create.camera(
+                position=tuple(camera_def["position"]),
+                look_at=look_at,
+                focal_length=focal_length,
+            )
+        else:
+            camera = rep.create.camera(
+                position=tuple(camera_def["position"]),
+                rotation=tuple(camera_def["rotation_xyz_deg"]),
+                focal_length=focal_length,
+            )
+
+        cameras.append(camera)
+
+    render_product_0 = rep.create.render_product(
+        cameras[0],
+        resolution,
+        name="camera_0_render_product",
+    )
+
+    render_product_1 = rep.create.render_product(
+        cameras[1],
+        resolution,
+        name="camera_1_render_product",
+    )
+
+    rep.orchestrator.set_capture_on_play(False)
+
+    writer = rep.WriterRegistry.get("BasicWriter")
+    writer.initialize(
+        output_dir=scene_dir_name,
+        rgb=bool(capture_cfg.get("rgb", True)),
+    )
+    writer.attach([render_product_0, render_product_1])
+
+    print("=" * 100)
+    print("Two-camera RGB capture")
+    print("=" * 100)
+    print(f"camera_0 position: {camera_defs[0]['position']}")
+    print(f"camera_1 position: {camera_defs[1]['position']}")
+    print(f"camera_0 pitch/yaw/roll deg: {camera_defs[0]['rotation_pyr_deg']}")
+    print(f"camera_1 pitch/yaw/roll deg: {camera_defs[1]['rotation_pyr_deg']}")
+    print(f"auto aim at target: {auto_aim}")
+    print(f"look_at: {look_at}")
+    print(f"resolution: {resolution}")
+    print(f"output directory: {output_dir.resolve()}")
+    print("=" * 100)
+
+    return [render_product_0, render_product_1], writer
+
+
+def compute_two_camera_definitions(camera_rig_cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    main_camera = camera_rig_cfg["main_camera"]
+    secondary_camera = camera_rig_cfg["secondary_camera"]
+
+    main_position = [float(value) for value in main_camera["position"]]
+    main_rotation_pyr = [float(value) for value in main_camera["rotation_deg"]]
+
+    secondary_position_offset = [
+        float(value) for value in secondary_camera["position_offset"]
+    ]
+    secondary_rotation_offset_pyr = [
+        float(value) for value in secondary_camera["rotation_offset_deg"]
+    ]
+
+    secondary_position = [
+        main_position[0] + secondary_position_offset[0],
+        main_position[1] + secondary_position_offset[1],
+        main_position[2] + secondary_position_offset[2],
+    ]
+
+    secondary_rotation_pyr = [
+        main_rotation_pyr[0] + secondary_rotation_offset_pyr[0],
+        main_rotation_pyr[1] + secondary_rotation_offset_pyr[1],
+        main_rotation_pyr[2] + secondary_rotation_offset_pyr[2],
+    ]
+
+    return [
+        {
+            "name": "camera_0",
+            "position": main_position,
+            "rotation_pyr_deg": main_rotation_pyr,
+            "rotation_xyz_deg": pitch_yaw_roll_to_usd_xyz_rotation(main_rotation_pyr),
+        },
+        {
+            "name": "camera_1",
+            "position": secondary_position,
+            "rotation_pyr_deg": secondary_rotation_pyr,
+            "rotation_xyz_deg": pitch_yaw_roll_to_usd_xyz_rotation(
+                secondary_rotation_pyr
+            ),
+        },
+    ]
+
+
+def pitch_yaw_roll_to_usd_xyz_rotation(
+    pitch_yaw_roll_deg: list[float],
+) -> tuple[float, float, float]:
+    """
+    GUI order is pitch, yaw, roll.
+
+    USD RotateXYZ order is X, Y, Z.
+
+    For our simple convention:
+      roll  -> X axis
+      pitch -> Y axis
+      yaw   -> Z axis
+    """
+
+    pitch = float(pitch_yaw_roll_deg[0])
+    yaw = float(pitch_yaw_roll_deg[1])
+    roll = float(pitch_yaw_roll_deg[2])
+
+    return roll, pitch, yaw
+
+
+def cleanup_capture(render_products: list[Any], writer: Any) -> None:
+    if writer is not None:
+        try:
+            writer.detach()
+        except Exception as exc:
+            print(f"[warning] writer.detach failed: {exc}")
+
+    for render_product in render_products:
+        try:
+            render_product.destroy()
+        except Exception as exc:
+            print(f"[warning] render_product.destroy failed: {exc}")
+
+
 def create_lights(stage: Usd.Stage) -> None:
     UsdGeom.Xform.Define(stage, "/World/Lights")
 
     dome = UsdLux.DomeLight.Define(stage, "/World/Lights/DomeLight")
-    dome.CreateIntensityAttr(450.0)
+    dome.CreateIntensityAttr(650.0)
 
     sun = UsdLux.DistantLight.Define(stage, "/World/Lights/Sun")
     sun.CreateIntensityAttr(2500.0)
@@ -117,12 +333,20 @@ def create_lights(stage: Usd.Stage) -> None:
     )
 
 
-def create_ground(stage: Usd.Stage) -> None:
-    material = make_material(
+def create_environment(stage: Usd.Stage) -> None:
+    ground_material = make_material(
         stage,
         "/World/Materials/GroundMat",
-        color=(0.35, 0.35, 0.35),
+        color=(0.35, 0.37, 0.35),
         roughness=0.9,
+        metallic=0.0,
+    )
+
+    blue_background_material = make_material(
+        stage,
+        "/World/Materials/BlueBackgroundMat",
+        color=(0.42, 0.62, 0.85),
+        roughness=0.95,
         metallic=0.0,
     )
 
@@ -131,13 +355,27 @@ def create_ground(stage: Usd.Stage) -> None:
         path="/World/Ground",
         translation=(0.0, 0.0, -0.03),
         rotation_deg=(0.0, 0.0, 0.0),
-        dimensions=(14.0, 14.0, 0.04),
-        material=material,
+        dimensions=(34.0, 34.0, 0.04),
+        material=ground_material,
+    )
+
+    # Simple blueish backdrop.
+    # Default cameras are at negative Y looking toward the origin,
+    # so this panel is placed behind the moving glider.
+    create_box(
+        stage=stage,
+        path="/World/BlueBackdrop",
+        translation=(0.0, 18.0, 5.0),
+        rotation_deg=(0.0, 0.0, 0.0),
+        dimensions=(34.0, 0.05, 14.0),
+        material=blue_background_material,
     )
 
 
 def create_anchor(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
     anchor_position = tuple(scene_config["anchor_position"])
+
+    UsdGeom.Xform.Define(stage, "/World/Anchor")
 
     anchor_material = make_material(
         stage,
@@ -230,12 +468,6 @@ def create_proxy_glider(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
         metallic=0.0,
     )
 
-    # Body frame:
-    #   +X forward
-    #   +Y left wing
-    #   +Z up
-    # Parent origin is treated as approximate center of mass.
-
     create_box(
         stage=stage,
         path="/World/Glider/Fuselage",
@@ -309,6 +541,114 @@ def create_proxy_glider(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
     )
 
 
+def create_camera_markers(stage: Usd.Stage, camera_rig_cfg: dict[str, Any]) -> None:
+    camera_defs = compute_two_camera_definitions(camera_rig_cfg)
+    look_at = [float(value) for value in camera_rig_cfg["look_at"]]
+    auto_aim = bool(camera_rig_cfg["auto_aim_at_target"])
+
+    UsdGeom.Xform.Define(stage, "/World/CameraMarkers")
+
+    cam0_material = make_material(
+        stage,
+        "/World/Materials/Camera0MarkerMat",
+        color=(0.05, 0.25, 0.95),
+        roughness=0.45,
+        metallic=0.0,
+    )
+
+    cam1_material = make_material(
+        stage,
+        "/World/Materials/Camera1MarkerMat",
+        color=(0.95, 0.45, 0.05),
+        roughness=0.45,
+        metallic=0.0,
+    )
+
+    lens_material = make_material(
+        stage,
+        "/World/Materials/CameraLensMarkerMat",
+        color=(0.01, 0.01, 0.015),
+        roughness=0.2,
+        metallic=0.1,
+    )
+
+    marker_materials = [cam0_material, cam1_material]
+
+    for index, camera_def in enumerate(camera_defs):
+        position = camera_def["position"]
+
+        if auto_aim:
+            yaw_deg = compute_yaw_to_target_deg(position, look_at)
+            rotation_xyz_deg = (0.0, 0.0, yaw_deg)
+        else:
+            rotation_xyz_deg = camera_def["rotation_xyz_deg"]
+
+        create_single_camera_marker(
+            stage=stage,
+            path=f"/World/CameraMarkers/{camera_def['name']}",
+            position=position,
+            rotation_xyz_deg=rotation_xyz_deg,
+            body_material=marker_materials[index],
+            lens_material=lens_material,
+        )
+
+
+def create_single_camera_marker(
+    stage: Usd.Stage,
+    path: str,
+    position: list[float],
+    rotation_xyz_deg: tuple[float, float, float],
+    body_material: UsdShade.Material,
+    lens_material: UsdShade.Material,
+) -> None:
+    UsdGeom.Xform.Define(stage, path)
+
+    set_xform(
+        stage=stage,
+        prim_path=path,
+        translation=(position[0], position[1], position[2]),
+        rotation_deg=rotation_xyz_deg,
+        scale=(1.0, 1.0, 1.0),
+    )
+
+    create_box(
+        stage=stage,
+        path=f"{path}/Post",
+        translation=(0.0, 0.0, 0.10),
+        rotation_deg=(0.0, 0.0, 0.0),
+        dimensions=(0.08, 0.08, 0.20),
+        material=body_material,
+    )
+
+    create_box(
+        stage=stage,
+        path=f"{path}/Body",
+        translation=(0.0, 0.0, 0.28),
+        rotation_deg=(0.0, 0.0, 0.0),
+        dimensions=(0.45, 0.25, 0.20),
+        material=body_material,
+    )
+
+    create_box(
+        stage=stage,
+        path=f"{path}/Lens",
+        translation=(0.30, 0.0, 0.28),
+        rotation_deg=(0.0, 0.0, 0.0),
+        dimensions=(0.18, 0.12, 0.12),
+        material=lens_material,
+    )
+
+
+def compute_yaw_to_target_deg(position: list[float], target: list[float]) -> float:
+    dx = float(target[0]) - float(position[0])
+    dy = float(target[1]) - float(position[1])
+
+    if abs(dx) < 1e-9 and abs(dy) < 1e-9:
+        return 0.0
+
+    return math.degrees(math.atan2(dy, dx))
+
+
 def update_tethered_glider_motion(
     stage: Usd.Stage,
     scene_config: dict[str, Any],
@@ -319,9 +659,6 @@ def update_tethered_glider_motion(
 
     theta = float(scene_config["angular_velocity_rad_s"]) * sim_time_s
 
-    # Tangent direction for counter-clockwise circular motion:
-    #   position direction = [cos(theta), sin(theta)]
-    #   velocity direction = [-sin(theta), cos(theta)]
     tangent_x = -math.sin(theta)
     tangent_y = math.cos(theta)
     yaw_deg = math.degrees(math.atan2(tangent_y, tangent_x))

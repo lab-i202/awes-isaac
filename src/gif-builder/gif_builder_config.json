@@ -1,0 +1,13 @@
+{
+  "input_folder": "C:/Users/Admin/Documents/Github/awes-isaac/src/kite-isaac/outputs/tethered_glider_basic/camera_0_render_product/rgb",
+  "output_gif": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\gif-builder\\outputs\\output_0.gif",
+  "duration_ms": "20",
+  "loop_count": "0",
+  "frame_stride": "3",
+  "recursive": false,
+  "resize_to_first_frame": true,
+  "natural_sort": true,
+  "quality_percent": "45",
+  "background_color": "#FFFFFF",
+  "extensions": ".png,.jpg,.jpeg,.bmp,.webp,.tif,.tiff,.gif"
+}

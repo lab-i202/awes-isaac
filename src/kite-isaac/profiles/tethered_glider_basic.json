@@ -1,0 +1,75 @@
+{
+  "scene_name": "tethered_glider_basic",
+  "anchor_position": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "tether_length_m": 8.0,
+  "glider_height_m": 1.5,
+  "angular_velocity_rad_s": 0.6,
+  "num_frames": 900,
+  "time_step_s": 0.016666666666666666,
+  "glider": {
+    "wingspan_m": 1.5,
+    "length_m": 0.95,
+    "body_width_m": 0.1,
+    "body_height_m": 0.1,
+    "wing_chord_m": 0.18,
+    "wing_thickness_m": 0.025
+  },
+  "camera_rig": {
+    "enabled": true,
+    "auto_aim_at_target": true,
+    "main_camera": {
+      "position": [
+        -2.5,
+        -12.0,
+        0.0
+      ],
+      "rotation_deg": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "secondary_camera": {
+      "position_offset": [
+        5.0,
+        0.0,
+        -0.1
+      ],
+      "rotation_offset_deg": [
+        0.0,
+        0.0,
+        0.0
+      ]
+    },
+    "look_at": [
+      0.0,
+      0.0,
+      1.5
+    ],
+    "focal_length": 20.0,
+    "resolution": [
+      1280,
+      720
+    ]
+  },
+  "capture": {
+    "enabled": true,
+    "output_root": "outputs",
+    "rgb": true,
+    "rt_subframes": 1
+  },
+  "future_wind": {
+    "enabled": false,
+    "mean_velocity_m_s": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "noise_std_m_s": 0.0,
+    "note": "Reserved for later. Do not use yet."
+  }
+}

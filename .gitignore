@@ -1,6 +1,8 @@
 .vscode
 .old
 .bat
+rgb/
+.gif
 
 
 # Byte-compiled / optimized / DLL files
