@@ -1,0 +1,37 @@
+{
+  "glider_assets": [
+    {
+      "name": "bixler_proxy_1400mm",
+      "type": "primitive_proxy",
+      "usd_path": null,
+      "description": "Simple primitive proxy inspired by Bixler/EasyStar foam gliders. Used before a real USD mesh is available.",
+      "scale_reference": {
+        "wingspan_m": 1.4,
+        "length_m": 0.95,
+        "estimated_mass_kg": 0.65
+      },
+      "body_frame": {
+        "origin": "center_of_mass",
+        "x_axis": "forward",
+        "y_axis": "left_wing",
+        "z_axis": "up"
+      }
+    }
+  ],
+  "environment_assets": [
+    {
+      "name": "empty_world",
+      "type": "procedural",
+      "usd_path": null,
+      "description": "No external environment asset. Ground, anchor, tether, and glider are created procedurally."
+    }
+  ],
+  "rotary_system_assets": [
+    {
+      "name": "central_rotary_proxy",
+      "type": "primitive_proxy",
+      "usd_path": null,
+      "description": "Simple cylinder and vertical mast at the tether anchor position."
+    }
+  ]
+}
