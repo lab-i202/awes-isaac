@@ -10,13 +10,17 @@ from __future__ import annotations
 import shutil
 import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
+from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import Any
+
+from utils.asset_io import collect_registry_status, load_asset_registry
 
 from utils.profile_io import (
     CAMERA_ORIENTATION_MODES,
     DEFAULT_CAMERA_RIG,
     DEFAULT_CAPTURE,
+    DEFAULT_GLIDER_ASSET,
+    GLIDER_ASSET_MODES,
     compute_parallel_rig_pitch_yaw_roll_deg,
     default_profile_path,
     load_json_profile,
@@ -87,6 +91,7 @@ class SceneProfileGui:
         self.initial_profile_path = initial_profile_path
         self.current_profile_path = initial_profile_path
         self.result: dict[str, Any] | None = None
+        self.available_glider_asset_ids = self._load_available_glider_asset_ids()
 
         self.root = tk.Tk()
         self.root.title("Tethered Glider Scene Profile")
@@ -103,6 +108,29 @@ class SceneProfileGui:
     def run(self) -> dict[str, Any] | None:
         self.root.mainloop()
         return self.result
+
+    def _load_available_glider_asset_ids(self) -> list[str]:
+        try:
+            registry = load_asset_registry(self.project_root)
+            statuses = collect_registry_status(self.project_root, registry)
+        except Exception:
+            return []
+
+        # The dropdown should show registry asset IDs, not arbitrary directory
+        # names. A folder is only usable here after it is registered and has a
+        # converted USD target path. Prefer converted assets first.
+        converted_ids = [
+            str(item["asset_id"])
+            for item in statuses
+            if bool(item.get("converted_usd_exists", False))
+        ]
+        other_ids = [
+            str(item["asset_id"])
+            for item in statuses
+            if not bool(item.get("converted_usd_exists", False))
+        ]
+
+        return sorted(converted_ids) + sorted(other_ids)
 
     def _build_variables(self) -> None:
         self.scene_name = tk.StringVar()
@@ -124,6 +152,19 @@ class SceneProfileGui:
         self.body_height_m = tk.DoubleVar()
         self.wing_chord_m = tk.DoubleVar()
         self.wing_thickness_m = tk.DoubleVar()
+
+        self.glider_asset_mode = tk.StringVar()
+        self.glider_asset_id = tk.StringVar()
+        self.glider_asset_uniform_scale = tk.DoubleVar()
+        self.glider_asset_rotation_x_deg = tk.DoubleVar()
+        self.glider_asset_rotation_y_deg = tk.DoubleVar()
+        self.glider_asset_rotation_z_deg = tk.DoubleVar()
+        self.glider_asset_offset_x = tk.DoubleVar()
+        self.glider_asset_offset_y = tk.DoubleVar()
+        self.glider_asset_offset_z = tk.DoubleVar()
+        self.glider_asset_use_proxy_fallback = tk.BooleanVar()
+        self.glider_asset_material_override = tk.BooleanVar()
+        self.glider_asset_color_hex = tk.StringVar()
 
         self.camera_enabled = tk.BooleanVar()
         self.camera_show_markers = tk.BooleanVar()
@@ -277,6 +318,11 @@ class SceneProfileGui:
         parent.configure(padding=12)
         row = 0
 
+        ttk.Label(parent, text="Proxy glider dimensions", font=("Segoe UI", 10, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 4)
+        )
+        row += 1
+
         self._add_float_row(parent, row, "Wingspan [m]", self.wingspan_m)
         row += 1
         self._add_float_row(parent, row, "Length [m]", self.length_m)
@@ -288,6 +334,110 @@ class SceneProfileGui:
         self._add_float_row(parent, row, "Wing chord [m]", self.wing_chord_m)
         row += 1
         self._add_float_row(parent, row, "Wing thickness [m]", self.wing_thickness_m)
+        row += 1
+
+        ttk.Separator(parent).grid(row=row, column=0, columnspan=2, sticky="ew", pady=12)
+        row += 1
+
+        ttk.Label(parent, text="Visual asset", font=("Segoe UI", 10, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 4)
+        )
+        row += 1
+
+        ttk.Label(parent, text="Visual mode").grid(row=row, column=0, sticky="w")
+        mode_box = ttk.Combobox(
+            parent,
+            textvariable=self.glider_asset_mode,
+            values=GLIDER_ASSET_MODES,
+            state="readonly",
+            width=24,
+        )
+        mode_box.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        row += 1
+
+        ttk.Label(parent, text="Asset ID").grid(row=row, column=0, sticky="w")
+        asset_selector = ttk.Frame(parent)
+        asset_selector.grid(row=row, column=1, sticky="ew", padx=8, pady=4)
+        asset_selector.columnconfigure(0, weight=1)
+
+        self.glider_asset_combo = ttk.Combobox(
+            asset_selector,
+            textvariable=self.glider_asset_id,
+            values=self.available_glider_asset_ids,
+            state="readonly" if self.available_glider_asset_ids else "normal",
+            width=34,
+        )
+        self.glider_asset_combo.grid(row=0, column=0, sticky="ew")
+
+        ttk.Button(
+            asset_selector,
+            text="Refresh",
+            command=self._on_refresh_glider_asset_list,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        row += 1
+
+        self._add_float_row(parent, row, "USD uniform scale", self.glider_asset_uniform_scale)
+        row += 1
+        self._add_float_row(parent, row, "USD rotation X [deg]", self.glider_asset_rotation_x_deg)
+        row += 1
+        self._add_float_row(parent, row, "USD rotation Y [deg]", self.glider_asset_rotation_y_deg)
+        row += 1
+        self._add_float_row(parent, row, "USD rotation Z [deg]", self.glider_asset_rotation_z_deg)
+        row += 1
+        self._add_float_row(parent, row, "USD offset X [m]", self.glider_asset_offset_x)
+        row += 1
+        self._add_float_row(parent, row, "USD offset Y [m]", self.glider_asset_offset_y)
+        row += 1
+        self._add_float_row(parent, row, "USD offset Z [m]", self.glider_asset_offset_z)
+        row += 1
+
+        ttk.Checkbutton(
+            parent,
+            text="Fallback to proxy if USD asset load fails",
+            variable=self.glider_asset_use_proxy_fallback,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 4))
+        row += 1
+
+        ttk.Checkbutton(
+            parent,
+            text="Override USD material with simple matte color",
+            variable=self.glider_asset_material_override,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+
+        ttk.Label(parent, text="Glider color").grid(row=row, column=0, sticky="w")
+        color_row = ttk.Frame(parent)
+        color_row.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        self.glider_color_preview = tk.Label(
+            color_row,
+            textvariable=self.glider_asset_color_hex,
+            width=12,
+            relief="solid",
+            borderwidth=1,
+        )
+        self.glider_color_preview.pack(side="left")
+        ttk.Button(
+            color_row,
+            text="Pick color",
+            command=self._on_pick_glider_asset_color,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            color_row,
+            text="Visible yellow",
+            command=self._on_set_glider_asset_visible_yellow,
+        ).pack(side="left", padx=(8, 0))
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "proxy uses the procedural box glider. usd_reference references the converted Bixler USD. "
+                "The current Bixler conversion is one geometry prim with no trusted texture/materials, "
+                "so per-part coloring is not available yet."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         parent.columnconfigure(1, weight=1)
 
@@ -504,11 +654,90 @@ class SceneProfileGui:
         )
         spinbox.grid(row=row, column=1, sticky="w", padx=8, pady=4)
 
+    def _on_refresh_glider_asset_list(self) -> None:
+        self.available_glider_asset_ids = self._load_available_glider_asset_ids()
+
+        if hasattr(self, "glider_asset_combo"):
+            self.glider_asset_combo.configure(
+                values=self.available_glider_asset_ids,
+                state="readonly" if self.available_glider_asset_ids else "normal",
+            )
+
+        current_asset_id = self.glider_asset_id.get().strip()
+        if not current_asset_id and self.available_glider_asset_ids:
+            self.glider_asset_id.set(self.available_glider_asset_ids[0])
+
+        self.status_text.set(
+            "Loaded glider asset IDs: "
+            + (", ".join(self.available_glider_asset_ids) if self.available_glider_asset_ids else "none")
+        )
+
+    def _on_pick_glider_asset_color(self) -> None:
+        current_hex = self.glider_asset_color_hex.get().strip() or "#ffd10d"
+        selected = colorchooser.askcolor(color=current_hex, title="Pick glider material color")
+
+        if selected is None or selected[1] is None:
+            return
+
+        self._set_glider_asset_color_hex(str(selected[1]))
+
+    def _on_set_glider_asset_visible_yellow(self) -> None:
+        self._set_glider_asset_color_hex("#ffd10d")
+
+    def _set_glider_asset_color_hex(self, color_hex: str) -> None:
+        normalized = self._normalize_hex_color(color_hex)
+        self.glider_asset_color_hex.set(normalized)
+
+        if hasattr(self, "glider_color_preview"):
+            self.glider_color_preview.configure(background=normalized)
+
+        self.status_text.set(f"Glider material color set to {normalized}")
+
+    @staticmethod
+    def _normalize_hex_color(color_hex: str) -> str:
+        value = color_hex.strip()
+        if not value.startswith("#"):
+            value = "#" + value
+
+        if len(value) != 7:
+            raise ValueError(f"Expected color in #RRGGBB format, got: {color_hex}")
+
+        int(value[1:3], 16)
+        int(value[3:5], 16)
+        int(value[5:7], 16)
+        return value.lower()
+
+    @staticmethod
+    def _rgb_float_to_hex(rgb: list[float]) -> str:
+        if len(rgb) != 3:
+            return "#ffd10d"
+
+        channels = []
+        for value in rgb:
+            clamped = max(0.0, min(1.0, float(value)))
+            channels.append(int(round(clamped * 255.0)))
+
+        return f"#{channels[0]:02x}{channels[1]:02x}{channels[2]:02x}"
+
+    @staticmethod
+    def _hex_to_rgb_float(color_hex: str) -> list[float]:
+        normalized = SceneProfileGui._normalize_hex_color(color_hex)
+        return [
+            int(normalized[1:3], 16) / 255.0,
+            int(normalized[3:5], 16) / 255.0,
+            int(normalized[5:7], 16) / 255.0,
+        ]
+
     def _load_profile_into_gui(self, profile: dict[str, Any]) -> None:
         glider = profile["glider"]
         camera_rig = normalize_camera_rig(profile.get("camera_rig", DEFAULT_CAMERA_RIG))
         capture = dict(DEFAULT_CAPTURE)
         capture.update(profile.get("capture", {}))
+        glider_asset = dict(DEFAULT_GLIDER_ASSET)
+        glider_asset.update(profile.get("glider_asset", {}))
+        material_override = dict(DEFAULT_GLIDER_ASSET["material_override"])
+        material_override.update(glider_asset.get("material_override", {}))
+        glider_asset["material_override"] = material_override
 
         self.scene_name.set(str(profile["scene_name"]))
 
@@ -530,6 +759,25 @@ class SceneProfileGui:
         self.body_height_m.set(float(glider["body_height_m"]))
         self.wing_chord_m.set(float(glider["wing_chord_m"]))
         self.wing_thickness_m.set(float(glider["wing_thickness_m"]))
+
+        self.glider_asset_mode.set(str(glider_asset.get("mode", DEFAULT_GLIDER_ASSET["mode"])))
+        self.glider_asset_id.set(str(glider_asset.get("asset_id", DEFAULT_GLIDER_ASSET["asset_id"])))
+        self.glider_asset_uniform_scale.set(float(glider_asset.get("uniform_scale", DEFAULT_GLIDER_ASSET["uniform_scale"])))
+
+        asset_rotation = glider_asset.get("rotation_xyz_deg", DEFAULT_GLIDER_ASSET["rotation_xyz_deg"])
+        asset_offset = glider_asset.get("translation_offset_m", DEFAULT_GLIDER_ASSET["translation_offset_m"])
+
+        self.glider_asset_rotation_x_deg.set(float(asset_rotation[0]))
+        self.glider_asset_rotation_y_deg.set(float(asset_rotation[1]))
+        self.glider_asset_rotation_z_deg.set(float(asset_rotation[2]))
+        self.glider_asset_offset_x.set(float(asset_offset[0]))
+        self.glider_asset_offset_y.set(float(asset_offset[1]))
+        self.glider_asset_offset_z.set(float(asset_offset[2]))
+        self.glider_asset_use_proxy_fallback.set(bool(glider_asset.get("use_proxy_fallback", True)))
+        self.glider_asset_material_override.set(bool(material_override.get("enabled", True)))
+        self._set_glider_asset_color_hex(
+            self._rgb_float_to_hex(material_override.get("diffuse_color", [1.0, 0.82, 0.05]))
+        )
 
         self.camera_enabled.set(bool(camera_rig["enabled"]))
         self.camera_show_markers.set(bool(camera_rig.get("show_markers", True)))
@@ -597,6 +845,28 @@ class SceneProfileGui:
                 "body_height_m": float(self.body_height_m.get()),
                 "wing_chord_m": float(self.wing_chord_m.get()),
                 "wing_thickness_m": float(self.wing_thickness_m.get()),
+            },
+            "glider_asset": {
+                "mode": self.glider_asset_mode.get().strip(),
+                "asset_id": self.glider_asset_id.get().strip(),
+                "uniform_scale": float(self.glider_asset_uniform_scale.get()),
+                "rotation_xyz_deg": [
+                    float(self.glider_asset_rotation_x_deg.get()),
+                    float(self.glider_asset_rotation_y_deg.get()),
+                    float(self.glider_asset_rotation_z_deg.get()),
+                ],
+                "translation_offset_m": [
+                    float(self.glider_asset_offset_x.get()),
+                    float(self.glider_asset_offset_y.get()),
+                    float(self.glider_asset_offset_z.get()),
+                ],
+                "use_proxy_fallback": bool(self.glider_asset_use_proxy_fallback.get()),
+                "material_override": {
+                    "enabled": bool(self.glider_asset_material_override.get()),
+                    "diffuse_color": self._hex_to_rgb_float(self.glider_asset_color_hex.get()),
+                    "roughness": 0.55,
+                    "metallic": 0.0,
+                },
             },
             "camera_rig": {
                 "enabled": bool(self.camera_enabled.get()),

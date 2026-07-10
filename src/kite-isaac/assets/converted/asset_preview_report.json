@@ -1,0 +1,55 @@
+{
+  "ok": true,
+  "status": "pass",
+  "created_utc": "2026-07-10T10:57:32.298995+00:00",
+  "project_root": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac",
+  "asset_id": "bixler_free3d",
+  "usd_path": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac\\assets\\converted\\bixler_free3d\\bixler_fbx.usd",
+  "usd_exists": true,
+  "registry_record_found": true,
+  "preview_transform": {
+    "uniform_scale": 1.0,
+    "rotation_xyz_deg": [
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  "inspection": {
+    "asset_prim_path": "/World/PreviewAsset",
+    "geometry_prim_count": 1,
+    "bbox_min_world_m": [
+      -0.2603917419910431,
+      -0.01175128154087388,
+      -0.16419406991104943
+    ],
+    "bbox_max_world_m": [
+      0.2603917717933655,
+      0.05676617270619343,
+      0.15263287879541773
+    ],
+    "bbox_center_world_m": [
+      1.4901161193847656e-08,
+      0.022507445582659776,
+      -0.0057805955578158486
+    ],
+    "bbox_size_world_m": [
+      0.5207835137844086,
+      0.0685174542470673,
+      0.31682694870646716
+    ],
+    "bbox_max_dimension_m": 0.5207835137844086,
+    "bbox_min_dimension_m": 0.0685174542470673,
+    "origin_to_bbox_center_distance_m": 0.023237908504416944,
+    "warnings": []
+  },
+  "target_wingspan_m": 1.5,
+  "recommended_uniform_scale_to_target_wingspan": 2.880275508531099,
+  "preview_stage_path": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac\\assets\\converted\\bixler_free3d\\bixler_free3d_preview_stage.usda",
+  "notes": [
+    "Use the bbox_size_world_m values to judge whether scale is plausible.",
+    "Use the colored axes in the viewport to inspect orientation: X=red, Y=green, Z=blue.",
+    "The yellow wireframe is the computed world-space bounding box.",
+    "Do not integrate this asset into the moving glider scene until scale, orientation, and origin are acceptable."
+  ]
+}

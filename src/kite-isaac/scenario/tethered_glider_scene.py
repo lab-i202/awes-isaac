@@ -22,6 +22,11 @@ import carb
 import omni.usd
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 
+from utils.asset_io import (
+    get_asset_converted_usd_path,
+    get_asset_entry,
+    load_asset_registry,
+)
 from utils.profile_io import normalize_camera_rig, sanitize_filename
 
 
@@ -50,7 +55,7 @@ def run_tethered_glider_scene(
     create_environment(stage)
     create_anchor(stage, scene_config)
     create_tether_curve(stage)
-    create_proxy_glider(stage, scene_config)
+    create_glider_visual(stage, scene_config)
 
     capture_cfg = scene_config.get("capture", {})
     camera_rig_cfg = normalize_camera_rig(scene_config.get("camera_rig", {}))
@@ -116,16 +121,18 @@ def run_tethered_glider_scene(
     print("=" * 100)
 
     try:
-        # Camera markers are now kept visible when camera_rig.show_markers=True.
-        # They are deliberately placed behind the virtual cameras and no longer
-        # use USD aim-lines, so they should not contaminate RGB captures.
-        # This avoids the previous behavior where markers disappeared during
-        # capture and made the user lose visual debugging context.
-        if capture_enabled and camera_enabled and bool(camera_rig_cfg.get("show_markers", True)):
+        # Keep camera marker geometry visible when the profile requests it.
+        # Earlier patches hid /World/CameraMarkers during capture to avoid RGB
+        # contamination. That made the camera models disappear from the viewport,
+        # which is unacceptable while tuning a camera rig.
+        #
+        # Dataset contamination should be handled later with dedicated non-rendered
+        # debug overlays or by disabling markers manually, not by secretly hiding
+        # user-requested viewport geometry.
+        if camera_enabled:
             print(
-                "Camera debug markers remain visible in the viewport. "
-                "They are placed behind the virtual cameras and are not connected "
-                "to the scene with renderable aim-lines."
+                "Camera markers visibility is controlled only by "
+                "camera_rig.show_markers. No automatic hiding during capture."
             )
 
         for frame_index in range(num_frames):
@@ -351,8 +358,7 @@ def write_capture_metadata(
             "camera_main uses the blue marker and outputs to camera_main/.",
             "camera_secondary uses the orange marker and outputs to camera_secondary/.",
             "look_at_target is toe-in stereo. parallel_manual is better for basic rectified stereo assumptions.",
-            "Camera debug markers are visible in the Isaac viewport when enabled.",
-            "Markers are offset behind the virtual cameras and renderable aim-lines are not used.",
+            "Camera debug markers are controlled only by camera_rig.show_markers; they are not automatically hidden during capture.",
         ],
     }
 
@@ -554,33 +560,6 @@ def compute_two_camera_definitions(camera_rig_cfg: dict[str, Any]) -> list[dict[
     main_aim = compute_yaw_pitch_to_target_deg(main_position, look_at)
     secondary_aim = compute_yaw_pitch_to_target_deg(secondary_position, look_at)
 
-    main_parallel_look_at = compute_parallel_manual_look_at_point(
-        main_position,
-        main_rotation_pyr,
-    )
-    secondary_parallel_look_at = compute_parallel_manual_look_at_point(
-        secondary_position,
-        secondary_rotation_pyr,
-    )
-
-    orientation_mode = str(camera_rig_cfg.get("orientation_mode", "parallel_manual"))
-
-    if orientation_mode == "look_at_target":
-        main_marker_target = look_at
-        secondary_marker_target = look_at
-    else:
-        main_marker_target = main_parallel_look_at
-        secondary_marker_target = secondary_parallel_look_at
-
-    main_marker_position, main_marker_rotation_xyz = compute_camera_marker_pose(
-        camera_position=main_position,
-        camera_target=main_marker_target,
-    )
-    secondary_marker_position, secondary_marker_rotation_xyz = compute_camera_marker_pose(
-        camera_position=secondary_position,
-        camera_target=secondary_marker_target,
-    )
-
     return [
         {
             "name": "camera_main",
@@ -589,11 +568,9 @@ def compute_two_camera_definitions(camera_rig_cfg: dict[str, Any]) -> list[dict[
             "position": main_position,
             "rotation_pyr_deg": main_rotation_pyr,
             "rotation_xyz_deg": pitch_yaw_roll_to_usd_xyz_rotation(main_rotation_pyr),
-            "parallel_look_at": main_parallel_look_at,
+            "parallel_look_at": compute_parallel_manual_look_at_point(main_position, main_rotation_pyr),
             "look_at_yaw_deg": main_aim[0],
             "look_at_pitch_deg": main_aim[1],
-            "marker_position": main_marker_position,
-            "marker_rotation_xyz_deg": main_marker_rotation_xyz,
         },
         {
             "name": "camera_secondary",
@@ -602,11 +579,9 @@ def compute_two_camera_definitions(camera_rig_cfg: dict[str, Any]) -> list[dict[
             "position": secondary_position,
             "rotation_pyr_deg": secondary_rotation_pyr,
             "rotation_xyz_deg": pitch_yaw_roll_to_usd_xyz_rotation(secondary_rotation_pyr),
-            "parallel_look_at": secondary_parallel_look_at,
+            "parallel_look_at": compute_parallel_manual_look_at_point(secondary_position, secondary_rotation_pyr),
             "look_at_yaw_deg": secondary_aim[0],
             "look_at_pitch_deg": secondary_aim[1],
-            "marker_position": secondary_marker_position,
-            "marker_rotation_xyz_deg": secondary_marker_rotation_xyz,
         },
     ]
 
@@ -670,58 +645,13 @@ def compute_parallel_manual_look_at_point(
     ]
 
 
-
-
-def compute_camera_marker_pose(
-    camera_position: list[float],
-    camera_target: list[float],
-    backward_offset_m: float = 1.25,
-) -> tuple[list[float], tuple[float, float, float]]:
-    """Return a visible marker pose that should not enter the camera image.
-
-    The marker is not placed at the exact virtual camera origin. It is placed
-    behind the virtual camera along the opposite of the camera forward direction.
-    This keeps the marker visible in the Isaac viewport while keeping it outside
-    the camera render product for normal forward-looking captures.
-    """
-
-    dx = float(camera_target[0]) - float(camera_position[0])
-    dy = float(camera_target[1]) - float(camera_position[1])
-    dz = float(camera_target[2]) - float(camera_position[2])
-
-    norm = math.sqrt(dx * dx + dy * dy + dz * dz)
-    if norm < 1e-9:
-        # Degenerate case. Put the marker behind the default +X direction.
-        forward = [1.0, 0.0, 0.0]
-    else:
-        forward = [dx / norm, dy / norm, dz / norm]
-
-    marker_position = [
-        float(camera_position[0]) - backward_offset_m * forward[0],
-        float(camera_position[1]) - backward_offset_m * forward[1],
-        max(0.0, float(camera_position[2]) - 0.42),
-    ]
-
-    yaw_deg = math.degrees(math.atan2(forward[1], forward[0]))
-
-    return marker_position, (0.0, 0.0, yaw_deg)
-
-
 def create_camera_markers(
     stage: Usd.Stage,
     camera_rig_cfg: dict[str, Any],
     camera_defs: list[dict[str, Any]],
 ) -> None:
-    """Create visible debug camera markers without contaminating RGB captures.
-
-    Important design choice:
-      - The markers are real USD geometry, so they are visible in the viewport.
-      - They are offset behind the virtual cameras, not placed exactly at the
-        optical centers.
-      - Renderable USD aim-lines were removed because a line from the camera
-        toward the target is guaranteed to be in front of the camera and can
-        contaminate RGB images.
-    """
+    look_at = [float(value) for value in camera_rig_cfg["look_at"]]
+    orientation_mode = str(camera_rig_cfg["orientation_mode"])
 
     UsdGeom.Xform.Define(stage, "/World/CameraMarkers")
 
@@ -752,20 +682,31 @@ def create_camera_markers(
     marker_materials = [main_material, secondary_material]
 
     for index, camera_def in enumerate(camera_defs):
+        position = camera_def["position"]
+
+        if orientation_mode == "look_at_target":
+            marker_rotation_xyz = (0.0, 0.0, float(camera_def["look_at_yaw_deg"]))
+        else:
+            marker_rotation_xyz = tuple(float(value) for value in camera_def["rotation_xyz_deg"])
+
         create_single_camera_marker(
             stage=stage,
             path=f"/World/CameraMarkers/{camera_def['name']}",
-            position=camera_def["marker_position"],
-            rotation_xyz_deg=tuple(float(value) for value in camera_def["marker_rotation_xyz_deg"]),
+            position=position,
+            rotation_xyz_deg=marker_rotation_xyz,
             body_material=marker_materials[index],
             lens_material=lens_material,
             is_main=(index == 0),
         )
 
+        # Do not create a renderable aim-line from the camera to the target.
+        # It is useful for debugging but can cross the camera frustum and contaminate RGB output.
+
     set_camera_markers_visible(
         stage=stage,
         visible=bool(camera_rig_cfg.get("show_markers", True)),
     )
+
 
 def create_single_camera_marker(
     stage: Usd.Stage,
@@ -789,7 +730,7 @@ def create_single_camera_marker(
     create_box(
         stage=stage,
         path=f"{path}/BasePost",
-        translation=(-0.30, 0.0, 0.16),
+        translation=(-0.55, 0.0, 0.16),
         rotation_deg=(0.0, 0.0, 0.0),
         dimensions=(0.10, 0.10, 0.32),
         material=body_material,
@@ -798,7 +739,7 @@ def create_single_camera_marker(
     create_box(
         stage=stage,
         path=f"{path}/Body",
-        translation=(0.0, 0.0, 0.42),
+        translation=(-0.55, 0.0, 0.42),
         rotation_deg=(0.0, 0.0, 0.0),
         dimensions=(0.48, 0.28, 0.22),
         material=body_material,
@@ -807,7 +748,7 @@ def create_single_camera_marker(
     create_box(
         stage=stage,
         path=f"{path}/Lens",
-        translation=(0.34, 0.0, 0.42),
+        translation=(-0.24, 0.0, 0.42),
         rotation_deg=(0.0, 0.0, 0.0),
         dimensions=(0.20, 0.13, 0.13),
         material=lens_material,
@@ -818,7 +759,7 @@ def create_single_camera_marker(
         create_box(
             stage=stage,
             path=f"{path}/MainIdFlag",
-            translation=(-0.34, 0.0, 0.72),
+            translation=(-0.85, 0.0, 0.72),
             rotation_deg=(0.0, 0.0, 0.0),
             dimensions=(0.12, 0.38, 0.08),
             material=body_material,
@@ -827,7 +768,7 @@ def create_single_camera_marker(
         create_box(
             stage=stage,
             path=f"{path}/SecondaryIdFlagA",
-            translation=(-0.34, 0.10, 0.72),
+            translation=(-0.85, 0.10, 0.72),
             rotation_deg=(0.0, 0.0, 0.0),
             dimensions=(0.12, 0.16, 0.08),
             material=body_material,
@@ -835,7 +776,7 @@ def create_single_camera_marker(
         create_box(
             stage=stage,
             path=f"{path}/SecondaryIdFlagB",
-            translation=(-0.34, -0.10, 0.72),
+            translation=(-0.85, -0.10, 0.72),
             rotation_deg=(0.0, 0.0, 0.0),
             dimensions=(0.12, 0.16, 0.08),
             material=body_material,
@@ -994,6 +935,95 @@ def create_tether_curve(stage: Usd.Stage) -> None:
     curve.CreateWidthsAttr([0.025, 0.025])
 
     bind_material(curve.GetPrim(), material)
+
+
+def create_glider_visual(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
+    glider_asset_cfg = scene_config.get("glider_asset", {})
+    mode = str(glider_asset_cfg.get("mode", "proxy"))
+
+    if mode == "proxy":
+        print("Glider visual mode: proxy")
+        create_proxy_glider(stage, scene_config)
+        return
+
+    if mode != "usd_reference":
+        raise ValueError(f"Unsupported glider_asset.mode: {mode}")
+
+    try:
+        create_usd_reference_glider(stage, scene_config, glider_asset_cfg)
+    except Exception as exc:
+        if bool(glider_asset_cfg.get("use_proxy_fallback", True)):
+            print(
+                "[warning] USD glider asset load failed. Falling back to proxy glider. "
+                f"Reason: {exc}"
+            )
+            create_proxy_glider(stage, scene_config)
+            return
+
+        raise
+
+
+def create_usd_reference_glider(
+    stage: Usd.Stage,
+    scene_config: dict[str, Any],
+    glider_asset_cfg: dict[str, Any],
+) -> None:
+    asset_id = str(glider_asset_cfg.get("asset_id", "")).strip()
+
+    if not asset_id:
+        raise ValueError("glider_asset.asset_id cannot be empty in usd_reference mode.")
+
+    registry = load_asset_registry(PROJECT_ROOT)
+    asset_entry = get_asset_entry(registry, asset_id)
+    usd_path = get_asset_converted_usd_path(PROJECT_ROOT, asset_entry)
+
+    if not usd_path.exists() or not usd_path.is_file():
+        raise FileNotFoundError(f"Converted USD asset does not exist: {usd_path}")
+
+    UsdGeom.Xform.Define(stage, "/World/Glider")
+    asset_prim = UsdGeom.Xform.Define(stage, "/World/Glider/Asset").GetPrim()
+
+    reference_path = str(usd_path.resolve()).replace("\\", "/")
+    asset_prim.GetReferences().AddReference(reference_path)
+
+    uniform_scale = float(glider_asset_cfg.get("uniform_scale", 1.0))
+    if uniform_scale <= 0.0:
+        raise ValueError("glider_asset.uniform_scale must be greater than zero.")
+
+    rotation_xyz_deg = tuple(
+        float(value) for value in glider_asset_cfg.get("rotation_xyz_deg", [0.0, 0.0, 0.0])
+    )
+    translation_offset_m = tuple(
+        float(value) for value in glider_asset_cfg.get("translation_offset_m", [0.0, 0.0, 0.0])
+    )
+
+    set_xform(
+        stage=stage,
+        prim_path="/World/Glider/Asset",
+        translation=translation_offset_m,
+        rotation_deg=rotation_xyz_deg,
+        scale=(uniform_scale, uniform_scale, uniform_scale),
+    )
+
+    material_override = glider_asset_cfg.get("material_override", {})
+    if bool(material_override.get("enabled", False)):
+        color = material_override.get("diffuse_color", [0.92, 0.92, 0.88])
+        material = make_material(
+            stage,
+            "/World/Materials/GliderAssetOverrideMat",
+            color=(float(color[0]), float(color[1]), float(color[2])),
+            roughness=float(material_override.get("roughness", 0.55)),
+            metallic=float(material_override.get("metallic", 0.0)),
+        )
+        bind_material_recursive(asset_prim, material)
+
+    print("Glider visual mode: usd_reference")
+    print(f"Glider asset id: {asset_id}")
+    print(f"Glider USD path: {usd_path}")
+    print(f"Glider USD reference path: {reference_path}")
+    print(f"Glider USD uniform scale: {uniform_scale}")
+    print(f"Glider USD child rotation XYZ deg: {rotation_xyz_deg}")
+    print(f"Glider USD child translation offset m: {translation_offset_m}")
 
 
 def create_proxy_glider(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
@@ -1175,3 +1205,16 @@ def make_material(
 def bind_material(prim: Usd.Prim, material: UsdShade.Material) -> None:
     UsdShade.MaterialBindingAPI.Apply(prim)
     UsdShade.MaterialBindingAPI(prim).Bind(material)
+
+
+def bind_material_recursive(prim: Usd.Prim, material: UsdShade.Material) -> None:
+    if not prim or not prim.IsValid():
+        return
+
+    try:
+        bind_material(prim, material)
+    except Exception:
+        pass
+
+    for child in prim.GetChildren():
+        bind_material_recursive(child, material)

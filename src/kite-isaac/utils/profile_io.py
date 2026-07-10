@@ -20,6 +20,11 @@ CAMERA_ORIENTATION_MODES = [
     "parallel_manual",
 ]
 
+GLIDER_ASSET_MODES = [
+    "proxy",
+    "usd_reference",
+]
+
 DEFAULT_CAMERA_RIG = {
     "enabled": True,
     "show_markers": True,
@@ -57,6 +62,33 @@ DEFAULT_CAPTURE = {
     # Keep BasicWriter filenames by default. Use capture_manifest.csv for time metadata.
     # Post-renaming can be enabled manually, but it is not recommended for datasets.
     "rename_after_capture": False,
+}
+
+
+DEFAULT_GLIDER_ASSET = {
+    # proxy: use the procedural box-based glider.
+    # usd_reference: reference a converted USD asset from assets/asset_registry.json.
+    "mode": "usd_reference",
+    "asset_id": "bixler_free3d",
+    # The converted Bixler preview report measured max dimension 0.5207835137844086 m.
+    # 1.5 / 0.5207835137844086 = 2.880275508531099.
+    "uniform_scale": 2.880275508531099,
+    # Candidate axis remap for the converted FBX: asset X appears to be wingspan,
+    # asset Z appears to be fuselage length, asset Y appears to be thickness/up.
+    # The scene expects: X=forward, Y=wingspan, Z=up.
+    # This can still be tuned in the GUI after visual inspection.
+    "rotation_xyz_deg": [90.0, 90.0, 0.0],
+    "translation_offset_m": [0.0, 0.0, 0.0],
+    "use_proxy_fallback": True,
+    "material_override": {
+        "enabled": True,
+        # Deliberately not white. The Free3D Bixler import is effectively
+        # untextured, so a visible debug color is more useful than white foam
+        # while tuning scale and orientation.
+        "diffuse_color": [1.0, 0.82, 0.05],
+        "roughness": 0.55,
+        "metallic": 0.0,
+    },
 }
 
 
@@ -132,6 +164,8 @@ def normalize_profile_schema(profile: dict[str, Any]) -> None:
     if "capture" in profile and isinstance(profile["capture"], dict):
         profile["capture"] = normalize_capture(profile["capture"])
 
+    profile["glider_asset"] = normalize_glider_asset(profile.get("glider_asset", {}))
+
 
 def normalize_capture(capture: dict[str, Any]) -> dict[str, Any]:
     normalized = copy.deepcopy(DEFAULT_CAPTURE)
@@ -143,6 +177,20 @@ def normalize_capture(capture: dict[str, Any]) -> dict[str, Any]:
     legacy_capture.pop("timestamp_filenames", None)
 
     normalized.update(legacy_capture)
+    return normalized
+
+
+def normalize_glider_asset(glider_asset: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(DEFAULT_GLIDER_ASSET)
+
+    if isinstance(glider_asset, dict):
+        normalized.update(glider_asset)
+
+        material_override = copy.deepcopy(DEFAULT_GLIDER_ASSET["material_override"])
+        if isinstance(glider_asset.get("material_override"), dict):
+            material_override.update(glider_asset["material_override"])
+        normalized["material_override"] = material_override
+
     return normalized
 
 
@@ -365,6 +413,9 @@ def validate_tethered_glider_profile(profile: dict[str, Any]) -> None:
         profile["capture"] = normalize_capture(profile["capture"])
         validate_capture(profile["capture"])
 
+    profile["glider_asset"] = normalize_glider_asset(profile.get("glider_asset", {}))
+    validate_glider_asset(profile["glider_asset"])
+
 
 def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
     if not isinstance(camera_rig, dict):
@@ -446,6 +497,70 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
 
         if value <= 0:
             raise ValueError(f"camera_rig.resolution[{index}] must be greater than zero.")
+
+
+def validate_glider_asset(glider_asset: dict[str, Any]) -> None:
+    if not isinstance(glider_asset, dict):
+        raise ValueError("glider_asset must be a JSON object.")
+
+    required_keys = [
+        "mode",
+        "asset_id",
+        "uniform_scale",
+        "rotation_xyz_deg",
+        "translation_offset_m",
+        "use_proxy_fallback",
+        "material_override",
+    ]
+
+    for key in required_keys:
+        if key not in glider_asset:
+            raise ValueError(f"Missing glider_asset key: {key}")
+
+    if glider_asset["mode"] not in GLIDER_ASSET_MODES:
+        raise ValueError(
+            "glider_asset.mode must be one of: " + ", ".join(GLIDER_ASSET_MODES)
+        )
+
+    if not isinstance(glider_asset["asset_id"], str) or not glider_asset["asset_id"].strip():
+        raise ValueError("glider_asset.asset_id must be a non-empty string.")
+
+    _require_number(glider_asset, "uniform_scale")
+    if float(glider_asset["uniform_scale"]) <= 0.0:
+        raise ValueError("glider_asset.uniform_scale must be greater than zero.")
+
+    _validate_vector3(glider_asset["rotation_xyz_deg"], "glider_asset.rotation_xyz_deg")
+    _validate_vector3(glider_asset["translation_offset_m"], "glider_asset.translation_offset_m")
+
+    if not isinstance(glider_asset["use_proxy_fallback"], bool):
+        raise ValueError("glider_asset.use_proxy_fallback must be true or false.")
+
+    material_override = glider_asset["material_override"]
+    if not isinstance(material_override, dict):
+        raise ValueError("glider_asset.material_override must be a JSON object.")
+
+    if not isinstance(material_override.get("enabled"), bool):
+        raise ValueError("glider_asset.material_override.enabled must be true or false.")
+
+    color = material_override.get("diffuse_color")
+    if not isinstance(color, list) or len(color) != 3:
+        raise ValueError("glider_asset.material_override.diffuse_color must be [r, g, b].")
+
+    for index, value in enumerate(color):
+        if not _is_number(value):
+            raise ValueError(
+                f"glider_asset.material_override.diffuse_color[{index}] must be a number."
+            )
+
+        if float(value) < 0.0 or float(value) > 1.0:
+            raise ValueError(
+                f"glider_asset.material_override.diffuse_color[{index}] must be between 0 and 1."
+            )
+
+    for key in ["roughness", "metallic"]:
+        _require_number(material_override, key)
+        if float(material_override[key]) < 0.0 or float(material_override[key]) > 1.0:
+            raise ValueError(f"glider_asset.material_override.{key} must be between 0 and 1.")
 
 
 def validate_capture(capture: dict[str, Any]) -> None:

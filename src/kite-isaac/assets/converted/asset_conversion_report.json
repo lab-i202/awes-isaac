@@ -1,0 +1,27 @@
+{
+  "ok": true,
+  "created_utc": "2026-07-10T10:51:39.584996+00:00",
+  "project_root": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac",
+  "records": [
+    {
+      "asset_id": "bixler_free3d",
+      "display_name": "Hobbyking Bixler / Sky Surfer - Free3D",
+      "source_path": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac\\assets\\bixler_free3d\\bixler.fbx",
+      "output_usd_path": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac\\assets\\converted\\bixler_free3d\\bixler_fbx.usd",
+      "status": "converted",
+      "message": "Conversion succeeded."
+    }
+  ],
+  "registry_status_after": [
+    {
+      "asset_id": "bixler_free3d",
+      "display_name": "Hobbyking Bixler / Sky Surfer - Free3D",
+      "source_path": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac\\assets\\bixler_free3d\\bixler.fbx",
+      "source_exists": true,
+      "source_extension": ".fbx",
+      "converted_usd_path": "C:\\Users\\Admin\\Documents\\Github\\awes-isaac\\src\\kite-isaac\\assets\\converted\\bixler_free3d\\bixler_fbx.usd",
+      "converted_usd_exists": true,
+      "conversion_enabled": true
+    }
+  ]
+}

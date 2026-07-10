@@ -1,0 +1,14 @@
+cd C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac
+& C:\Users\Admin\anaconda3\envs\awes-isaac\python.exe convert_assets_to_usd.py --asset-id bixler_free3d
+
+
+
+If you need to overwrite a previous conversion:
+& C:\Users\Admin\anaconda3\envs\awes-isaac\python.exe convert_assets_to_usd.py --asset-id bixler_free3d --force
+
+
+
+
+
+Preview Model
+C:\Users\Admin\anaconda3\envs\awes-isaac\python.exe preview_converted_asset.py --asset-id bixler_free3d

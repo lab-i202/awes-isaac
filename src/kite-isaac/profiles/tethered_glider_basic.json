@@ -18,6 +18,32 @@
     "wing_chord_m": 0.18,
     "wing_thickness_m": 0.025
   },
+  "glider_asset": {
+    "mode": "usd_reference",
+    "asset_id": "bixler_free3d",
+    "uniform_scale": 2.880275508531099,
+    "rotation_xyz_deg": [
+      -90.0,
+      180.0,
+      90.0
+    ],
+    "translation_offset_m": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "use_proxy_fallback": true,
+    "material_override": {
+      "enabled": true,
+      "diffuse_color": [
+        0.8627450980392157,
+        0.49411764705882355,
+        0.00392156862745098
+      ],
+      "roughness": 0.55,
+      "metallic": 0.0
+    }
+  },
   "camera_rig": {
     "enabled": true,
     "show_markers": true,
@@ -32,18 +58,18 @@
       "rotation_deg": [
         2.386,
         90.0,
-        0.0
+        -0.1
       ]
     },
     "secondary_camera": {
       "label": "secondary_camera_orange",
       "position_offset": [
         5.0,
-        0.0,
+        -0.1,
         0.0
       ],
       "rotation_offset_deg": [
-        0.0,
+        -0.2,
         0.0,
         0.0
       ]

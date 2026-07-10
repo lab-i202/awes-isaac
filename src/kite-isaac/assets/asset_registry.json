@@ -1,37 +1,77 @@
 {
-  "glider_assets": [
-    {
-      "name": "bixler_proxy_1400mm",
-      "type": "primitive_proxy",
-      "usd_path": null,
-      "description": "Simple primitive proxy inspired by Bixler/EasyStar foam gliders. Used before a real USD mesh is available.",
-      "scale_reference": {
-        "wingspan_m": 1.4,
-        "length_m": 0.95,
-        "estimated_mass_kg": 0.65
+  "version": 1,
+  "project_units": "meters",
+  "assets": {
+    "bixler_free3d": {
+      "kind": "aircraft_glider",
+      "display_name": "Hobbyking Bixler / Sky Surfer - Free3D",
+      "description": "Downloaded source model package for the Bixler/Sky Surfer foam glider prototype. Convert the FBX source to USD before using it as the scene glider asset.",
+      "license": {
+        "name": "Personal Use License",
+        "source_url": "https://free3d.com/3d-model/hobbyking-bixler-sky-surfer-89447.html",
+        "notes": "Use for local prototyping only unless the license terms are verified for your intended dataset/research/commercial use. Do not redistribute the original or converted model package without checking the license."
       },
-      "body_frame": {
-        "origin": "center_of_mass",
-        "x_axis": "forward",
-        "y_axis": "left_wing",
-        "z_axis": "up"
+      "source": {
+        "preferred_file": "assets/bixler_free3d/bixler.fbx",
+        "fallback_files": [
+          "assets/bixler_free3d/bixler.obj",
+          "assets/bixler_free3d/bixler.stl",
+          "assets/bixler_free3d/bixler.blend"
+        ],
+        "texture_files": [
+          "assets/bixler_free3d/bixlerTexturedUVmap.png",
+          "assets/bixler_free3d/bixlerDisplay.png"
+        ],
+        "texture_files_note": "Free3D specification says textures/materials are not provided/trusted. Do not rely on these files for final dataset appearance."
+      },
+      "converted": {
+        "usd_file": "assets/converted/bixler_free3d/bixler_fbx.usd"
+      },
+      "conversion": {
+        "enabled": true,
+        "source_format": "fbx",
+        "use_meter_as_world_unit": true,
+        "convert_fbx_to_z_up": true,
+        "ignore_cameras": true,
+        "ignore_lights": true,
+        "ignore_animations": true,
+        "smooth_normals": true,
+        "keep_all_materials": true,
+        "merge_all_meshes": false,
+        "single_mesh": false,
+        "export_preview_surface": true
+      },
+      "scene_defaults": {
+        "prim_path": "/World/Glider/Asset",
+        "uniform_scale": 2.880275508531099,
+        "translation_offset_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rotation_xyz_deg": [
+          90.0,
+          90.0,
+          0.0
+        ],
+        "scale": [
+          2.880275508531099,
+          2.880275508531099,
+          2.880275508531099
+        ],
+        "use_proxy_fallback": true,
+        "material_override": {
+          "enabled": true,
+          "diffuse_color": [
+            0.92,
+            0.92,
+            0.88
+          ],
+          "roughness": 0.55,
+          "metallic": 0.0
+        },
+        "notes": "Preview report: one geometry prim, bbox max dimension 0.5207835137844086 m, recommended scale 2.880275508531099 for 1.5 m wingspan. Rotation is a candidate axis remap and may need visual tuning."
       }
     }
-  ],
-  "environment_assets": [
-    {
-      "name": "empty_world",
-      "type": "procedural",
-      "usd_path": null,
-      "description": "No external environment asset. Ground, anchor, tether, and glider are created procedurally."
-    }
-  ],
-  "rotary_system_assets": [
-    {
-      "name": "central_rotary_proxy",
-      "type": "primitive_proxy",
-      "usd_path": null,
-      "description": "Simple cylinder and vertical mast at the tether anchor position."
-    }
-  ]
+  }
 }
