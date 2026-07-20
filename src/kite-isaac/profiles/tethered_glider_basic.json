@@ -3,12 +3,12 @@
   "anchor_position": [
     0.0,
     0.0,
-    0.0
+    1.0
   ],
   "tether_length_m": 8.0,
   "glider_height_m": 1.5,
-  "angular_velocity_rad_s": 0.6,
-  "num_frames": 900,
+  "angular_velocity_rad_s": 1.2,
+  "num_frames": 600,
   "time_step_s": 0.016666666666666666,
   "glider": {
     "wingspan_m": 1.5,
@@ -23,21 +23,21 @@
     "asset_id": "bixler_free3d",
     "uniform_scale": 2.880275508531099,
     "rotation_xyz_deg": [
-      -90.0,
-      180.0,
+      -90.2,
+      190.0,
       90.0
     ],
     "translation_offset_m": [
       0.0,
-      0.0,
+      -0.1,
       0.0
     ],
     "use_proxy_fallback": true,
     "material_override": {
       "enabled": true,
       "diffuse_color": [
-        0.8627450980392157,
-        0.49411764705882355,
+        0.6862745098039216,
+        0.396078431372549,
         0.00392156862745098
       ],
       "roughness": 0.55,
@@ -58,7 +58,7 @@
       "rotation_deg": [
         2.386,
         90.0,
-        -0.1
+        -0.2
       ]
     },
     "secondary_camera": {
@@ -69,14 +69,14 @@
         0.0
       ],
       "rotation_offset_deg": [
-        -0.2,
+        -0.3,
         0.0,
         0.0
       ]
     },
     "look_at": [
       0.0,
-      0.0,
+      -0.1,
       1.5
     ],
     "focal_length": 35.0,
