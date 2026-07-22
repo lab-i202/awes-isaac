@@ -1,0 +1,77 @@
+Folder PATH listing
+Volume serial number is 512C-1F00
+C:.
+|   convert_assets_to_usd argparse.txt
+|   convert_assets_to_usd.py
+|   dashboard_requirements.txt
+|   dashboard_streamlit.py
+|   main.py
+|   preview_converted_asset.py
+|   README_PATCH.md
+|   run_commands.txt
+|   validate_outputs.py
+|   validate_outputs.txt
+|   
++---assets
+|   |   asset_registry.json
+|   |   
+|   +---bixler_free3d
+|   |       .DS_Store
+|   |       bixler.3ds
+|   |       bixler.blend
+|   |       bixler.blend1
+|   |       bixler.blend2
+|   |       bixler.fbx
+|   |       bixler.mtl
+|   |       bixler.obj
+|   |       bixler.stl
+|   |       bixlerDisplay.png
+|   |       bixlerTexturedUVmap.png
+|   |       download_link.txt
+|   |       
+|   \---converted
+|       |   asset_conversion_report.json
+|       |   asset_preview_report.json
+|       |   
+|       \---bixler_free3d
+|               bixler_fbx.usd
+|               bixler_free3d_preview_stage.usda
+|               
++---bat
+|       folder_structure.txt
+|       run-build-folder-tree.bat
+|       run-dashboard.bat
+|       
++---gui
+|   |   scene_profile_gui.py
+|   |   __init__.py
+|   |   
+|   \---__pycache__
+|           scene_profile_gui.cpython-311.pyc
+|           scene_profile_gui.cpython-313.pyc
+|           __init__.cpython-311.pyc
+|           
++---outputs
++---profiles
+|       tethered_glider_basic.json
+|       
++---scenario
+|   |   tethered_glider_scene.py
+|   |   __init__.py
+|   |   
+|   \---__pycache__
+|           tethered_glider_scene.cpython-311.pyc
+|           tethered_glider_scene.cpython-313.pyc
+|           __init__.cpython-311.pyc
+|           
+\---utils
+    |   asset_io.py
+    |   profile_io.py
+    |   __init__.py
+    |   
+    \---__pycache__
+            asset_io.cpython-311.pyc
+            profile_io.cpython-311.pyc
+            profile_io.cpython-313.pyc
+            __init__.cpython-311.pyc
+            

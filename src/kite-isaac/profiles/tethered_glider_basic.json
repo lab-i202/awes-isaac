@@ -8,7 +8,7 @@
   "tether_length_m": 8.0,
   "glider_height_m": 1.5,
   "angular_velocity_rad_s": 1.2,
-  "num_frames": 600,
+  "num_frames": 1200,
   "time_step_s": 0.016666666666666666,
   "glider": {
     "wingspan_m": 1.5,
@@ -56,7 +56,7 @@
         1.0
       ],
       "rotation_deg": [
-        2.386,
+        2.3,
         90.0,
         -0.2
       ]
@@ -71,7 +71,7 @@
       "rotation_offset_deg": [
         -0.3,
         0.0,
-        0.0
+        -0.8
       ]
     },
     "look_at": [
@@ -89,7 +89,7 @@
     "enabled": true,
     "output_root": "outputs",
     "rgb": true,
-    "rt_subframes": 1,
+    "rt_subframes": 2,
     "camera_params": false,
     "rename_after_capture": false
   },

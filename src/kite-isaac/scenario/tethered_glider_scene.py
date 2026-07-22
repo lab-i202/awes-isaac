@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -120,6 +121,13 @@ def run_tethered_glider_scene(
         print(f"Post-rename after capture: {capture_cfg.get('rename_after_capture', False)}")
     print("=" * 100)
 
+    live_state_writer: LiveFrameStateCsvWriter | None = None
+    live_last_frame_updater: LiveLastFrameImageUpdater | None = None
+
+    if capture_enabled and camera_enabled and output_dir is not None:
+        live_state_writer = LiveFrameStateCsvWriter(output_dir=output_dir)
+        live_last_frame_updater = LiveLastFrameImageUpdater(output_dir=output_dir)
+
     try:
         # Keep camera marker geometry visible when the profile requests it.
         # Earlier patches hid /World/CameraMarkers during capture to avoid RGB
@@ -133,6 +141,12 @@ def run_tethered_glider_scene(
             print(
                 "Camera markers visibility is controlled only by "
                 "camera_rig.show_markers. No automatic hiding during capture."
+            )
+
+        if live_state_writer is not None:
+            print(
+                "Live frame_state.csv streaming is enabled. The dashboard can read "
+                "telemetry while Isaac Sim is still capturing."
             )
 
         for frame_index in range(num_frames):
@@ -153,6 +167,19 @@ def run_tethered_glider_scene(
                     delta_time=0.0,
                     wait_for_render=True,
                 )
+
+            if live_state_writer is not None:
+                live_state_writer.write_row(
+                    compute_glider_state_row(
+                        scene_config=scene_config,
+                        frame_index=frame_index,
+                        sim_time_s=sim_time_s,
+                        manifest_map={},
+                    )
+                )
+
+            if live_last_frame_updater is not None:
+                live_last_frame_updater.update()
 
             if frame_index % 60 == 0:
                 glider_position = compute_glider_position(scene_config, sim_time_s)
@@ -195,7 +222,25 @@ def run_tethered_glider_scene(
                         time_step_s=time_step_s,
                     )
 
+                # Close the live writer before finalizing frame_state.csv.
+                # On Windows, rewriting a CSV while it is still open for live
+                # streaming can fail or produce stale content.
+                if live_state_writer is not None:
+                    live_state_writer.close()
+                    live_state_writer = None
+
+                write_frame_state_csv(
+                    output_dir=output_dir,
+                    scene_config=scene_config,
+                    num_frames=num_frames,
+                    time_step_s=time_step_s,
+                )
+                write_last_frame_images(output_dir=output_dir)
+
     finally:
+        if live_state_writer is not None:
+            live_state_writer.close()
+
         cleanup_capture(render_products=render_products, writers=writers)
 
     print("Simulation finished.")
@@ -364,6 +409,309 @@ def write_capture_metadata(
 
     with open(output_dir / "camera_rig_metadata.json", "w", encoding="utf-8") as file:
         json.dump(metadata, file, indent=2)
+
+
+def load_capture_manifest_map(output_dir: Path) -> dict[str, dict[int, dict[str, str]]]:
+    """Return manifest records by camera name and frame index.
+
+    The manifest is the source of truth for the actual image filenames. It works
+    both when BasicWriter names are kept and when post-capture timestamp renaming
+    is enabled.
+    """
+
+    manifest_path = output_dir / "capture_manifest.csv"
+    records: dict[str, dict[int, dict[str, str]]] = {
+        "camera_main": {},
+        "camera_secondary": {},
+    }
+
+    if not manifest_path.exists():
+        return records
+
+    with open(manifest_path, "r", newline="", encoding="utf-8") as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            camera_name = str(row.get("camera_name", "")).strip()
+            if camera_name not in records:
+                continue
+
+            try:
+                frame_index = int(row.get("frame_index", ""))
+            except ValueError:
+                continue
+
+            relative_path = str(row.get("relative_path", "")).strip()
+            saved_filename = str(row.get("saved_filename", "")).strip()
+            new_filename = str(row.get("new_filename", "")).strip()
+            original_filename = str(row.get("original_filename", "")).strip()
+
+            if not saved_filename:
+                saved_filename = new_filename or original_filename or Path(relative_path).name
+
+            records[camera_name][frame_index] = {
+                "relative_path": relative_path,
+                "filename": saved_filename,
+            }
+
+    return records
+
+
+def default_rgb_relative_path(camera_name: str, frame_index: int) -> str:
+    return f"{camera_name}/rgb_{frame_index:04d}.png"
+
+
+def compute_glider_state_row(
+    scene_config: dict[str, Any],
+    frame_index: int,
+    sim_time_s: float,
+    manifest_map: dict[str, dict[int, dict[str, str]]],
+) -> dict[str, Any]:
+    anchor = [float(value) for value in scene_config["anchor_position"]]
+    tether_length = float(scene_config["tether_length_m"])
+    glider_height = float(scene_config["glider_height_m"])
+    angular_velocity = float(scene_config["angular_velocity_rad_s"])
+    theta = angular_velocity * sim_time_s
+
+    glider_position = compute_glider_position(scene_config, sim_time_s)
+
+    tangent_x = -math.sin(theta)
+    tangent_y = math.cos(theta)
+    yaw_deg = math.degrees(math.atan2(tangent_y, tangent_x))
+
+    velocity_x = -tether_length * angular_velocity * math.sin(theta)
+    velocity_y = tether_length * angular_velocity * math.cos(theta)
+    velocity_z = 0.0
+    linear_speed = math.sqrt(velocity_x * velocity_x + velocity_y * velocity_y + velocity_z * velocity_z)
+
+    tether_vector_x = glider_position[0] - anchor[0]
+    tether_vector_y = glider_position[1] - anchor[1]
+    tether_vector_z = glider_position[2] - anchor[2]
+
+    actual_horizontal_tether_length = math.sqrt(
+        tether_vector_x * tether_vector_x + tether_vector_y * tether_vector_y
+    )
+    actual_3d_anchor_to_glider_length = math.sqrt(
+        tether_vector_x * tether_vector_x
+        + tether_vector_y * tether_vector_y
+        + tether_vector_z * tether_vector_z
+    )
+    tether_constraint_error = abs(actual_horizontal_tether_length - tether_length)
+
+    glider_asset_cfg = scene_config.get("glider_asset", {})
+    glider_visual_mode = str(glider_asset_cfg.get("mode", "proxy"))
+    glider_asset_id = str(glider_asset_cfg.get("asset_id", ""))
+
+    main_record = manifest_map.get("camera_main", {}).get(frame_index, {})
+    secondary_record = manifest_map.get("camera_secondary", {}).get(frame_index, {})
+
+    camera_main_rgb = main_record.get(
+        "relative_path",
+        default_rgb_relative_path("camera_main", frame_index),
+    )
+    camera_secondary_rgb = secondary_record.get(
+        "relative_path",
+        default_rgb_relative_path("camera_secondary", frame_index),
+    )
+
+    return {
+        "frame_index": frame_index,
+        "sim_timestamp_s": f"{sim_time_s:.9f}",
+        "glider_x_m": f"{glider_position[0]:.9f}",
+        "glider_y_m": f"{glider_position[1]:.9f}",
+        "glider_z_m": f"{glider_position[2]:.9f}",
+        "glider_roll_deg": f"{0.0:.9f}",
+        "glider_pitch_deg": f"{0.0:.9f}",
+        "glider_yaw_deg": f"{yaw_deg:.9f}",
+        "glider_vx_m_s": f"{velocity_x:.9f}",
+        "glider_vy_m_s": f"{velocity_y:.9f}",
+        "glider_vz_m_s": f"{velocity_z:.9f}",
+        "linear_speed_m_s": f"{linear_speed:.9f}",
+        "anchor_x_m": f"{anchor[0]:.9f}",
+        "anchor_y_m": f"{anchor[1]:.9f}",
+        "anchor_z_m": f"{anchor[2]:.9f}",
+        "commanded_horizontal_tether_length_m": f"{tether_length:.9f}",
+        "glider_height_command_m": f"{glider_height:.9f}",
+        "actual_horizontal_tether_length_m": f"{actual_horizontal_tether_length:.9f}",
+        "actual_3d_anchor_to_glider_length_m": f"{actual_3d_anchor_to_glider_length:.9f}",
+        "tether_constraint_error_m": f"{tether_constraint_error:.12f}",
+        "tether_vector_x_m": f"{tether_vector_x:.9f}",
+        "tether_vector_y_m": f"{tether_vector_y:.9f}",
+        "tether_vector_z_m": f"{tether_vector_z:.9f}",
+        "angular_velocity_rad_s": f"{angular_velocity:.9f}",
+        "theta_rad": f"{theta:.9f}",
+        "theta_deg": f"{math.degrees(theta):.9f}",
+        "camera_main_rgb": camera_main_rgb,
+        "camera_secondary_rgb": camera_secondary_rgb,
+        "glider_visual_mode": glider_visual_mode,
+        "glider_asset_id": glider_asset_id,
+        "motion_model": "kinematic_circle",
+    }
+
+
+
+class LiveFrameStateCsvWriter:
+    """Append frame_state.csv rows during capture.
+
+    The previous v12 implementation wrote frame_state.csv only after the whole
+    Isaac run finished. That made the Streamlit dashboard useless for telemetry
+    during long captures. This writer opens frame_state.csv at the start of the
+    run, writes one row per timestep, and flushes immediately so a separate
+    dashboard process can read partial telemetry.
+
+    At the end of the run, write_frame_state_csv() still rewrites the complete
+    final CSV from the manifest. That final rewrite is deliberate: it preserves
+    correct filenames even when post-capture renaming is enabled.
+    """
+
+    def __init__(self, output_dir: Path):
+        self.output_dir = output_dir
+        self.path = output_dir / "frame_state.csv"
+        self.file = None
+        self.writer: csv.DictWriter | None = None
+        self.fieldnames: list[str] | None = None
+        self.rows_written = 0
+
+    def write_row(self, row: dict[str, Any]) -> None:
+        if self.writer is None:
+            self.fieldnames = list(row.keys())
+            self.file = open(self.path, "w", newline="", encoding="utf-8")
+            self.writer = csv.DictWriter(self.file, fieldnames=self.fieldnames)
+            self.writer.writeheader()
+
+        self.writer.writerow(row)
+        self.rows_written += 1
+
+        # Flush every row. This is intentionally more important than raw speed:
+        # the dashboard is a live monitor, not only an after-run report viewer.
+        if self.file is not None:
+            self.file.flush()
+
+    def close(self) -> None:
+        if self.file is not None:
+            try:
+                self.file.flush()
+            finally:
+                self.file.close()
+                self.file = None
+
+        if self.rows_written > 0:
+            print(f"Live frame_state.csv rows streamed: {self.rows_written} -> {self.path}")
+
+
+class LiveLastFrameImageUpdater:
+    """Update camera_main/last_frame.png and camera_secondary/last_frame.png while capturing.
+
+    The copy is atomic from the dashboard point of view: we copy to a temporary
+    path and then replace last_frame.png. If the RGB file is still being written
+    by Replicator, the copy may fail; that is non-fatal and the next frame will
+    try again.
+    """
+
+    def __init__(self, output_dir: Path):
+        self.output_dir = output_dir
+        self.last_copied_source_by_camera: dict[str, str] = {}
+
+    def update(self) -> None:
+        for camera_folder in ["camera_main", "camera_secondary"]:
+            camera_dir = self.output_dir / camera_folder
+            if not camera_dir.exists() or not camera_dir.is_dir():
+                continue
+
+            image_files = list_rgb_files_sorted(camera_dir)
+            if not image_files:
+                continue
+
+            source_path = image_files[-1]
+            if self.last_copied_source_by_camera.get(camera_folder) == source_path.name:
+                continue
+
+            destination_path = camera_dir / "last_frame.png"
+            temp_path = camera_dir / ".last_frame.tmp.png"
+
+            try:
+                if source_path.stat().st_size <= 0:
+                    continue
+
+                shutil.copy2(source_path, temp_path)
+                temp_path.replace(destination_path)
+                self.last_copied_source_by_camera[camera_folder] = source_path.name
+            except OSError:
+                # Do not spam the console during live capture. The final
+                # write_last_frame_images() call after capture remains the
+                # authoritative last-frame copy.
+                try:
+                    if temp_path.exists():
+                        temp_path.unlink()
+                except OSError:
+                    pass
+
+
+def write_frame_state_csv(
+    output_dir: Path,
+    scene_config: dict[str, Any],
+    num_frames: int,
+    time_step_s: float,
+) -> None:
+    manifest_map = load_capture_manifest_map(output_dir)
+
+    rows = [
+        compute_glider_state_row(
+            scene_config=scene_config,
+            frame_index=frame_index,
+            sim_time_s=frame_index * time_step_s,
+            manifest_map=manifest_map,
+        )
+        for frame_index in range(num_frames)
+    ]
+
+    if not rows:
+        print("[warning] no frame state rows were generated.")
+        return
+
+    state_path = output_dir / "frame_state.csv"
+    with open(state_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"Frame state CSV written: {state_path}")
+
+
+def list_rgb_files_sorted(camera_dir: Path) -> list[Path]:
+    return sorted(
+        [
+            path
+            for path in camera_dir.iterdir()
+            if path.is_file()
+            and path.suffix.lower() in IMAGE_SUFFIXES
+            and path.name.lower().startswith("rgb_")
+        ],
+        key=lambda path: path.name.lower(),
+    )
+
+
+def write_last_frame_images(output_dir: Path) -> None:
+    """Copy each camera's latest RGB image to last_frame.png.
+
+    This is deliberately a copy, not a rename. It is a user-convenience preview
+    file and does not affect capture_manifest.csv or frame_state.csv.
+    """
+
+    for camera_folder in ["camera_main", "camera_secondary"]:
+        camera_dir = output_dir / camera_folder
+        if not camera_dir.exists() or not camera_dir.is_dir():
+            print(f"[warning] cannot write last_frame.png; missing camera folder: {camera_dir}")
+            continue
+
+        image_files = list_rgb_files_sorted(camera_dir)
+        if not image_files:
+            print(f"[warning] cannot write last_frame.png; no RGB files found in: {camera_dir}")
+            continue
+
+        source_path = image_files[-1]
+        destination_path = camera_dir / "last_frame.png"
+        shutil.copy2(source_path, destination_path)
+        print(f"Last frame copied: {source_path.name} -> {destination_path}")
 
 
 def write_basicwriter_capture_manifest(

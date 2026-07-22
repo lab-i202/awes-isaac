@@ -1,0 +1,3 @@
+# Dashboard
+cd "C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac"
+clear; streamlit run dashboard_streamlit.py
