@@ -51,6 +51,9 @@ DEFAULT_ENVIRONMENT = {
 DEFAULT_CAMERA_RIG = {
     "enabled": True,
     "show_markers": True,
+    "show_frustums": False,
+    "frustum_distance_m": 4.0,
+    "frustum_line_width_m": 0.025,
     # look_at_target: Isaac/Replicator aims each camera at camera_rig.look_at.
     #   This is easy for detection/tracking but creates toe-in stereo.
     # parallel_manual: both cameras use explicit pitch/yaw/roll. This is better
@@ -59,6 +62,8 @@ DEFAULT_CAMERA_RIG = {
     "orientation_mode": "parallel_manual",
     "main_camera": {
         "label": "main_camera_blue",
+        "marker_color": [0.05, 0.25, 0.95],
+        "frustum_color": [0.05, 0.25, 0.95],
         "position": [-2.5, -12.0, 1.0],
         # GUI order: pitch, yaw, roll in degrees.
         # This default points a parallel stereo pair roughly toward the scene
@@ -67,11 +72,17 @@ DEFAULT_CAMERA_RIG = {
     },
     "secondary_camera": {
         "label": "secondary_camera_orange",
+        "marker_color": [0.95, 0.45, 0.05],
+        "frustum_color": [0.95, 0.45, 0.05],
         "position_offset": [5.0, 0.0, 0.0],
         # Keep stereo cameras parallel by default.
         "rotation_offset_deg": [0.0, 0.0, 0.0],
     },
     "look_at": [0.0, 0.0, 1.5],
+    "horizontal_fov_deg": 33.332,
+    "horizontal_aperture_mm": 20.955,
+    # focal_length is kept because Replicator uses it internally.
+    # The GUI edits horizontal_fov_deg and this value is recomputed on save/load.
     "focal_length": 35.0,
     "resolution": [1280, 720],
 }
@@ -174,6 +185,31 @@ def sanitize_filename(value: str) -> str:
 
     return cleaned
 
+
+def focal_length_mm_from_horizontal_fov(horizontal_fov_deg: float, horizontal_aperture_mm: float = 20.955) -> float:
+    """Return focal length from horizontal field-of-view and horizontal aperture.
+
+    Formula for a pinhole camera:
+        focal = aperture / (2 * tan(fov / 2))
+    """
+    fov = float(horizontal_fov_deg)
+    aperture = float(horizontal_aperture_mm)
+    if not (0.1 < fov < 179.0):
+        raise ValueError("horizontal_fov_deg must be between 0.1 and 179 degrees.")
+    if aperture <= 0.0:
+        raise ValueError("horizontal_aperture_mm must be greater than zero.")
+    return aperture / (2.0 * math.tan(math.radians(fov) / 2.0))
+
+
+def horizontal_fov_deg_from_focal_length(focal_length_mm: float, horizontal_aperture_mm: float = 20.955) -> float:
+    """Return horizontal field-of-view from focal length and horizontal aperture."""
+    focal = float(focal_length_mm)
+    aperture = float(horizontal_aperture_mm)
+    if focal <= 0.0:
+        raise ValueError("focal_length must be greater than zero.")
+    if aperture <= 0.0:
+        raise ValueError("horizontal_aperture_mm must be greater than zero.")
+    return math.degrees(2.0 * math.atan(aperture / (2.0 * focal)))
 
 # -----------------------------------------------------------------------------
 # Schema normalization
@@ -285,6 +321,9 @@ def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
 
         normalized["enabled"] = bool(camera_rig.get("enabled", normalized["enabled"]))
         normalized["show_markers"] = bool(camera_rig.get("show_markers", normalized["show_markers"]))
+        normalized["show_frustums"] = bool(camera_rig.get("show_frustums", normalized.get("show_frustums", False)))
+        normalized["frustum_distance_m"] = float(camera_rig.get("frustum_distance_m", normalized.get("frustum_distance_m", 4.0)))
+        normalized["frustum_line_width_m"] = float(camera_rig.get("frustum_line_width_m", normalized.get("frustum_line_width_m", 0.025)))
         normalized["orientation_mode"] = str(
             camera_rig.get("orientation_mode", normalized["orientation_mode"])
         )
@@ -298,8 +337,26 @@ def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
         if "look_at" in camera_rig:
             normalized["look_at"] = camera_rig["look_at"]
 
-        if "focal_length" in camera_rig:
+        if "horizontal_aperture_mm" in camera_rig:
+            normalized["horizontal_aperture_mm"] = camera_rig["horizontal_aperture_mm"]
+
+        if "horizontal_fov_deg" in camera_rig:
+            normalized["horizontal_fov_deg"] = camera_rig["horizontal_fov_deg"]
+            normalized["focal_length"] = focal_length_mm_from_horizontal_fov(
+                float(normalized["horizontal_fov_deg"]),
+                float(normalized.get("horizontal_aperture_mm", DEFAULT_CAMERA_RIG["horizontal_aperture_mm"])),
+            )
+        elif "focal_length" in camera_rig:
             normalized["focal_length"] = camera_rig["focal_length"]
+            normalized["horizontal_fov_deg"] = horizontal_fov_deg_from_focal_length(
+                float(normalized["focal_length"]),
+                float(normalized.get("horizontal_aperture_mm", DEFAULT_CAMERA_RIG["horizontal_aperture_mm"])),
+            )
+        else:
+            normalized["focal_length"] = focal_length_mm_from_horizontal_fov(
+                float(normalized["horizontal_fov_deg"]),
+                float(normalized.get("horizontal_aperture_mm", DEFAULT_CAMERA_RIG["horizontal_aperture_mm"])),
+            )
 
         if "resolution" in camera_rig:
             normalized["resolution"] = camera_rig["resolution"]
@@ -360,6 +417,9 @@ def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
         normalized = copy.deepcopy(DEFAULT_CAMERA_RIG)
         normalized["enabled"] = bool(camera_rig.get("enabled", True))
         normalized["show_markers"] = bool(camera_rig.get("show_markers", True))
+        normalized["show_frustums"] = bool(camera_rig.get("show_frustums", False))
+        normalized["frustum_distance_m"] = float(camera_rig.get("frustum_distance_m", normalized.get("frustum_distance_m", 4.0)))
+        normalized["frustum_line_width_m"] = float(camera_rig.get("frustum_line_width_m", normalized.get("frustum_line_width_m", 0.025)))
         normalized["orientation_mode"] = "parallel_manual"
         normalized["main_camera"]["position"] = main_position
         normalized["secondary_camera"]["position_offset"] = secondary_offset
@@ -373,8 +433,26 @@ def normalize_camera_rig(camera_rig: dict[str, Any]) -> dict[str, Any]:
         if "look_at" in camera_rig:
             normalized["look_at"] = camera_rig["look_at"]
 
-        if "focal_length" in camera_rig:
+        if "horizontal_aperture_mm" in camera_rig:
+            normalized["horizontal_aperture_mm"] = camera_rig["horizontal_aperture_mm"]
+
+        if "horizontal_fov_deg" in camera_rig:
+            normalized["horizontal_fov_deg"] = camera_rig["horizontal_fov_deg"]
+            normalized["focal_length"] = focal_length_mm_from_horizontal_fov(
+                float(normalized["horizontal_fov_deg"]),
+                float(normalized.get("horizontal_aperture_mm", DEFAULT_CAMERA_RIG["horizontal_aperture_mm"])),
+            )
+        elif "focal_length" in camera_rig:
             normalized["focal_length"] = camera_rig["focal_length"]
+            normalized["horizontal_fov_deg"] = horizontal_fov_deg_from_focal_length(
+                float(normalized["focal_length"]),
+                float(normalized.get("horizontal_aperture_mm", DEFAULT_CAMERA_RIG["horizontal_aperture_mm"])),
+            )
+        else:
+            normalized["focal_length"] = focal_length_mm_from_horizontal_fov(
+                float(normalized["horizontal_fov_deg"]),
+                float(normalized.get("horizontal_aperture_mm", DEFAULT_CAMERA_RIG["horizontal_aperture_mm"])),
+            )
 
         if "resolution" in camera_rig:
             normalized["resolution"] = camera_rig["resolution"]
@@ -504,10 +582,15 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
     required_keys = [
         "enabled",
         "show_markers",
+        "show_frustums",
+        "frustum_distance_m",
+        "frustum_line_width_m",
         "orientation_mode",
         "main_camera",
         "secondary_camera",
         "look_at",
+        "horizontal_fov_deg",
+        "horizontal_aperture_mm",
         "focal_length",
         "resolution",
     ]
@@ -521,6 +604,18 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
 
     if not isinstance(camera_rig["show_markers"], bool):
         raise ValueError("camera_rig.show_markers must be true or false.")
+
+    if not isinstance(camera_rig["show_frustums"], bool):
+        raise ValueError("camera_rig.show_frustums must be true or false.")
+
+    _require_number(camera_rig, "frustum_distance_m")
+    _require_number(camera_rig, "frustum_line_width_m")
+
+    if float(camera_rig["frustum_distance_m"]) <= 0:
+        raise ValueError("camera_rig.frustum_distance_m must be greater than zero.")
+
+    if float(camera_rig["frustum_line_width_m"]) <= 0:
+        raise ValueError("camera_rig.frustum_line_width_m must be greater than zero.")
 
     if camera_rig["orientation_mode"] not in CAMERA_ORIENTATION_MODES:
         raise ValueError(
@@ -545,6 +640,18 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
         if key not in secondary_camera:
             raise ValueError(f"Missing camera_rig.secondary_camera key: {key}")
 
+    if "marker_color" in main_camera:
+        _validate_color3(main_camera["marker_color"], "camera_rig.main_camera.marker_color")
+
+    if "marker_color" in secondary_camera:
+        _validate_color3(secondary_camera["marker_color"], "camera_rig.secondary_camera.marker_color")
+
+    if "frustum_color" in main_camera:
+        _validate_color3(main_camera["frustum_color"], "camera_rig.main_camera.frustum_color")
+
+    if "frustum_color" in secondary_camera:
+        _validate_color3(secondary_camera["frustum_color"], "camera_rig.secondary_camera.frustum_color")
+
     _validate_vector3(main_camera["position"], "camera_rig.main_camera.position")
     _validate_vector3(
         main_camera["rotation_deg"],
@@ -562,7 +669,15 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
 
     _validate_vector3(camera_rig["look_at"], "camera_rig.look_at")
 
+    _require_number(camera_rig, "horizontal_fov_deg")
+    _require_number(camera_rig, "horizontal_aperture_mm")
     _require_number(camera_rig, "focal_length")
+
+    if not (0.1 < float(camera_rig["horizontal_fov_deg"]) < 179.0):
+        raise ValueError("camera_rig.horizontal_fov_deg must be between 0.1 and 179 degrees.")
+
+    if float(camera_rig["horizontal_aperture_mm"]) <= 0:
+        raise ValueError("camera_rig.horizontal_aperture_mm must be greater than zero.")
 
     if camera_rig["focal_length"] <= 0:
         raise ValueError("camera_rig.focal_length must be greater than zero.")
@@ -578,6 +693,17 @@ def validate_camera_rig(camera_rig: dict[str, Any]) -> None:
         if value <= 0:
             raise ValueError(f"camera_rig.resolution[{index}] must be greater than zero.")
 
+
+
+def _validate_color3(value: Any, name: str) -> None:
+    if not isinstance(value, list) or len(value) != 3:
+        raise ValueError(f"{name} must be [r, g, b].")
+
+    for index, item in enumerate(value):
+        if not isinstance(item, (int, float)) or isinstance(item, bool):
+            raise ValueError(f"{name}[{index}] must be a number.")
+        if float(item) < 0.0 or float(item) > 1.0:
+            raise ValueError(f"{name}[{index}] must be between 0 and 1.")
 
 def validate_glider_asset(glider_asset: dict[str, Any]) -> None:
     if not isinstance(glider_asset, dict):

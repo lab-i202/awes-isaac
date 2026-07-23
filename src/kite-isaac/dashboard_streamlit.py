@@ -28,6 +28,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
@@ -35,6 +36,35 @@ DEFAULT_DATASET_DIR = PROJECT_ROOT / "outputs" / "tethered_glider_basic"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
 CAMERA_FOLDERS = ["camera_main", "camera_secondary"]
 PLOT_TEMPLATE = "plotly_white"
+
+
+def discover_dataset_dirs(outputs_root: Path) -> list[Path]:
+    """Return output scene folders, newest first.
+
+    A folder is considered useful when it contains typical dataset files, but
+    empty folders are also shown so the dashboard can watch a live run that is
+    just starting.
+    """
+    if not outputs_root.exists() or not outputs_root.is_dir():
+        return []
+
+    candidates = [path for path in outputs_root.iterdir() if path.is_dir()]
+
+    def mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    return sorted(candidates, key=mtime, reverse=True)
+
+
+def dataset_label(path: Path) -> str:
+    try:
+        modified = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+    except OSError:
+        modified = "unknown time"
+    return f"{path.name} — {modified}"
 
 
 # -----------------------------------------------------------------------------
@@ -173,6 +203,9 @@ def coerce_numeric_columns(df: pd.DataFrame) -> pd.DataFrame:
         "glider_visual_mode",
         "glider_asset_id",
         "motion_model",
+        "environment_mode",
+        "environment_asset_id",
+        "environment_scene_path",
     }
 
     result = df.copy()
@@ -226,7 +259,48 @@ def make_time_series_figure(df: pd.DataFrame, selected_columns: list[str], x_col
     return fig
 
 
-def make_trajectory_figure(df: pd.DataFrame) -> go.Figure:
+def make_trajectory_xy_figure(df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+    required = {"glider_x_m", "glider_y_m"}
+
+    if df.empty or not required.issubset(set(df.columns)):
+        fig.update_layout(title="No XY trajectory data available", template=PLOT_TEMPLATE)
+        return fig
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["glider_x_m"],
+            y=df["glider_y_m"],
+            mode="lines+markers",
+            name="glider XY trajectory",
+            marker={"size": 4},
+        )
+    )
+
+    if {"anchor_x_m", "anchor_y_m"}.issubset(set(df.columns)):
+        anchor = df.tail(1).iloc[0]
+        fig.add_trace(
+            go.Scatter(
+                x=[anchor["anchor_x_m"]],
+                y=[anchor["anchor_y_m"]],
+                mode="markers",
+                name="anchor",
+                marker={"size": 10, "symbol": "x"},
+            )
+        )
+
+    fig.update_layout(
+        template=PLOT_TEMPLATE,
+        title="Glider XY trajectory (WebGL-free)",
+        xaxis_title="x [m]",
+        yaxis_title="y [m]",
+        yaxis={"scaleanchor": "x", "scaleratio": 1},
+        hovermode="closest",
+    )
+    return fig
+
+
+def make_trajectory_3d_figure(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     required = {"glider_x_m", "glider_y_m", "glider_z_m"}
 
@@ -234,6 +308,8 @@ def make_trajectory_figure(df: pd.DataFrame) -> go.Figure:
         fig.update_layout(title="No XYZ trajectory data available", template=PLOT_TEMPLATE)
         return fig
 
+    # Scatter3d requires WebGL in the browser. Keep it optional because some
+    # browsers or remote desktops disable WebGL.
     fig.add_trace(
         go.Scatter3d(
             x=df["glider_x_m"],
@@ -246,7 +322,7 @@ def make_trajectory_figure(df: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(
         template=PLOT_TEMPLATE,
-        title="Glider 3D trajectory",
+        title="Glider 3D trajectory (requires browser WebGL)",
         scene={
             "xaxis_title": "x [m]",
             "yaxis_title": "y [m]",
@@ -255,7 +331,6 @@ def make_trajectory_figure(df: pd.DataFrame) -> go.Figure:
         },
     )
     return fig
-
 
 def sanitize_filename_token(value: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_\-]+", "_", value.strip())
@@ -357,12 +432,34 @@ st.caption("Reads generated files only. It does not control Isaac Sim.")
 
 with st.sidebar:
     st.header("Dataset")
-    dataset_input = st.text_input(
-        "Dataset folder",
-        value=str(DEFAULT_DATASET_DIR),
-        help="Use an absolute path or a path relative to the project root.",
+
+    outputs_root = PROJECT_ROOT / "outputs"
+    dataset_dirs = discover_dataset_dirs(outputs_root)
+    dataset_labels = ["Manual path"] + [dataset_label(path) for path in dataset_dirs]
+    dataset_label_to_path = {dataset_label(path): path for path in dataset_dirs}
+
+    default_dataset_index = 1 if dataset_dirs else 0
+    if "dataset_choice" in st.session_state and st.session_state["dataset_choice"] in dataset_labels:
+        default_dataset_index = dataset_labels.index(st.session_state["dataset_choice"])
+
+    dataset_choice = st.selectbox(
+        "Existing scene output",
+        options=dataset_labels,
+        index=default_dataset_index,
+        key="dataset_choice",
+        help="Folders are read from outputs/. Newest folders appear first.",
     )
-    dataset_dir = resolve_dataset_dir(dataset_input)
+
+    if dataset_choice == "Manual path":
+        dataset_input = st.text_input(
+            "Dataset folder",
+            value=str(DEFAULT_DATASET_DIR),
+            help="Use an absolute path or a path relative to the project root.",
+        )
+        dataset_dir = resolve_dataset_dir(dataset_input)
+    else:
+        dataset_dir = dataset_label_to_path[dataset_choice].resolve()
+        st.caption(f"Selected: `{dataset_dir}`")
 
     st.header("Live update")
 
@@ -395,6 +492,24 @@ with st.sidebar:
 
     if st.button("Refresh now"):
         st.rerun()
+
+    st.header("Camera display")
+    if "swap_camera_columns" not in st.session_state:
+        st.session_state.swap_camera_columns = False
+
+    if st.button("Swap camera columns"):
+        st.session_state.swap_camera_columns = not bool(st.session_state.swap_camera_columns)
+        st.rerun()
+
+    swap_camera_columns = bool(st.session_state.swap_camera_columns)
+    st.caption(
+        "Display order only. This does not rename camera folders, profiles, CSV columns, "
+        "or capture outputs."
+    )
+    st.caption(
+        "Current order: "
+        + ("camera_secondary | camera_main" if swap_camera_columns else "camera_main | camera_secondary")
+    )
 
     st.header("Rows")
     tail_rows = st.slider("Recent rows to show", min_value=5, max_value=500, value=20)
@@ -435,6 +550,8 @@ frame_state_path = dataset_dir / "frame_state.csv"
 manifest_path = dataset_dir / "capture_manifest.csv"
 metadata_path = dataset_dir / "camera_rig_metadata.json"
 validation_path = dataset_dir / "validation_report.json"
+layout_svg_path = dataset_dir / "camera_rig_layout.svg"
+layout_json_path = dataset_dir / "camera_rig_layout.json"
 
 frame_state = coerce_numeric_columns(read_csv_if_exists(frame_state_path))
 manifest = read_csv_if_exists(manifest_path)
@@ -472,20 +589,35 @@ if not frame_state.empty:
 # -----------------------------------------------------------------------------
 
 
-tab_live, tab_data, tab_plots, tab_files = st.tabs(
-    ["Live cameras", "Telemetry rows", "Plots", "Files"]
+tab_live, tab_layout, tab_data, tab_plots, tab_files = st.tabs(
+    ["Live cameras", "Camera layout", "Telemetry rows", "Plots", "Files"]
 )
 
 with tab_live:
     st.subheader("Latest camera images")
+    displayed_camera_folders = list(reversed(CAMERA_FOLDERS)) if swap_camera_columns else list(CAMERA_FOLDERS)
+
+    control_cols = st.columns([1, 5])
+    with control_cols[0]:
+        if st.button("Swap columns", key="swap_camera_columns_live"):
+            st.session_state.swap_camera_columns = not bool(st.session_state.swap_camera_columns)
+            st.rerun()
+    with control_cols[1]:
+        st.caption(
+            "Display order only; dataset folder names and telemetry references stay unchanged. "
+            f"Current order: {displayed_camera_folders[0]} | {displayed_camera_folders[1]}"
+        )
+
     camera_cols = st.columns(2)
 
-    for index, camera_folder in enumerate(CAMERA_FOLDERS):
+    for index, camera_folder in enumerate(displayed_camera_folders):
         camera_dir = dataset_dir / camera_folder
         image_path = newest_available_camera_image(camera_dir)
 
         with camera_cols[index]:
+            physical_side = "left display column" if index == 0 else "right display column"
             st.markdown(f"### {camera_folder}")
+            st.caption(physical_side)
 
             if image_path is None:
                 st.warning(f"No RGB image found in {camera_dir}")
@@ -507,6 +639,30 @@ with tab_live:
                 )
             except OSError:
                 st.caption(f"Path: `{image_path}`")
+
+with tab_layout:
+    st.subheader("Camera rig layout")
+    st.caption(
+        "This is the correct place to inspect stereo geometry and approximate view overlap. "
+        "In-scene frustum lines are renderable debug geometry and can contaminate RGB images."
+    )
+
+    if layout_svg_path.exists():
+        try:
+            svg_text = layout_svg_path.read_text(encoding="utf-8")
+            components.html(svg_text, height=760, scrolling=True)
+            st.caption(f"SVG: `{layout_svg_path}`")
+        except Exception as exc:
+            st.error(f"Could not display `{layout_svg_path}`: {exc}")
+    else:
+        st.warning(f"No camera_rig_layout.svg found at `{layout_svg_path}`. Run a capture first.")
+
+    with st.expander("camera_rig_layout.json", expanded=False):
+        layout_json = read_json_if_exists(layout_json_path)
+        if layout_json:
+            st.json(layout_json)
+        else:
+            st.info(f"No layout JSON found at `{layout_json_path}`")
 
 with tab_data:
     st.subheader("Recent frame_state.csv rows")
@@ -595,8 +751,17 @@ with tab_plots:
                     )
 
         st.divider()
-        trajectory_fig = make_trajectory_figure(plot_df)
+        trajectory_fig = make_trajectory_xy_figure(plot_df)
         st.plotly_chart(trajectory_fig, use_container_width=True, config={"displaylogo": False})
+
+        enable_3d = st.checkbox(
+            "Enable 3D trajectory plot (requires browser WebGL)",
+            value=False,
+            help="Plotly 3D charts need browser WebGL. Leave off when the browser shows WebGL errors.",
+        )
+        if enable_3d:
+            trajectory_3d_fig = make_trajectory_3d_figure(plot_df)
+            st.plotly_chart(trajectory_3d_fig, use_container_width=True, config={"displaylogo": False})
 
         if st.button("Export trajectory bundle"):
             try:
@@ -635,7 +800,7 @@ with tab_files:
     st.subheader("Dataset files")
 
     file_rows = []
-    for path in [frame_state_path, manifest_path, metadata_path, validation_path]:
+    for path in [frame_state_path, manifest_path, metadata_path, layout_svg_path, layout_json_path, validation_path]:
         file_rows.append(
             {
                 "file": path.name,

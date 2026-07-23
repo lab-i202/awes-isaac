@@ -1,71 +1,20 @@
-# kite_isaac_environment_loader_v15
+# v18 dashboard camera-order and frustum-diagnostic fixes
 
-This patch adds an external environment loader with whole-scene transform controls.
+Patch name: `kite_isaac_dashboard_frustum_layout_v18.zip`
 
-## Replace/add these files
+This patch builds on v17. It fixes the dashboard camera-column order issue and clarifies the camera-frustum workflow.
+
+## Replace these files
+
+Copy these files into the project root, preserving folders:
 
 ```text
-utils/asset_io.py
-utils/profile_io.py
-gui/scene_profile_gui.py
 scenario/tethered_glider_scene.py
+dashboard_streamlit.py
+README_PATCH.md
 ```
 
-`dashboard_streamlit.py` is included unchanged from v14 for convenience.
-
-## What changed
-
-- Existing `plain_debug` scene remains available and unchanged.
-- New `external_usd` environment mode loads local environment folders from:
-
-```text
-assets/environments/<environment_id>/
-```
-
-- The GUI now has an **Environment** tab.
-- Environment dropdown is populated from local folders under `assets/environments/`.
-- The whole imported environment is loaded under:
-
-```text
-/World/Environment
-```
-
-- The whole imported environment can be transformed together:
-
-```text
-translation_m
-rotation_xyz_deg
-uniform_scale
-```
-
-- Project-created objects still remain separate:
-
-```text
-/World/Glider
-/World/Cameras
-/World/CameraMarkers
-/World/Tether
-/World/Anchor
-```
-
-- `frame_state.csv` now logs:
-
-```text
-environment_mode
-environment_asset_id
-environment_scene_path
-environment_translation_x_m
-environment_translation_y_m
-environment_translation_z_m
-environment_rotation_x_deg
-environment_rotation_y_deg
-environment_rotation_z_deg
-environment_uniform_scale
-```
-
-## Expected environment folder
-
-Your current folder is correct:
+No environment assets are changed. Keep your environment at:
 
 ```text
 assets/environments/flatland_trees_cloudy_01/
@@ -76,24 +25,167 @@ assets/environments/flatland_trees_cloudy_01/
     textures/
 ```
 
-## First GUI settings
+## Fixed / changed behavior
 
-Open the GUI and set:
+### 1. Dashboard: swap camera columns
+
+The dashboard now has a camera-display control:
 
 ```text
-Environment mode: external_usd
-External environment ID: flatland_trees_cloudy_01
-Translation: [0, 0, 0]
-Rotation XYZ: [0, 0, 0]
-Uniform scale: 1
-Use project default lights: unchecked
-Fallback to plain_debug: checked
+Swap camera columns
 ```
 
-Use the transform fields only if the glider/camera rig is not centered over the useful grass field.
+This only changes the dashboard display order:
 
-## Notes
+```text
+camera_main | camera_secondary
+```
 
-If the imported environment already has a Dome Light / HDRI / sun, leave project default lights off to avoid double lighting.
+or:
 
-The NVIDIA tree URLs in the scene are still external dependencies. That is acceptable for local development but not fully self-contained.
+```text
+camera_secondary | camera_main
+```
+
+It does not rename folders, does not change `capture_manifest.csv`, does not change `frame_state.csv`, and does not change the profile.
+
+Use this when the physical right camera is currently stored as `camera_main`, or when you simply want the dashboard display to match your visual interpretation.
+
+### 2. Dashboard: new Camera layout tab
+
+The dashboard now includes a tab:
+
+```text
+Camera layout
+```
+
+It displays:
+
+```text
+outputs/<scene>/camera_rig_layout.svg
+outputs/<scene>/camera_rig_layout.json
+```
+
+This is the correct diagnostic for stereo geometry, camera placement, horizontal FOV, and approximate view overlap.
+
+### 3. Camera layout SVG now uses the configured frustum distance
+
+Before v18, the SVG drew a compact schematic wedge. That was useful but not faithful to the `frustum_distance_m` setting.
+
+v18 changes the generated SVG so that the top-down wedges use:
+
+```json
+"camera_rig": {
+  "horizontal_fov_deg": ...,
+  "frustum_distance_m": ...
+}
+```
+
+The diagram draws transparent wedges. Their overlap appears by transparency blending.
+
+This makes the diagram more useful when you set, for example:
+
+```text
+frustum_distance_m = 50
+frustum_distance_m = 100
+frustum_distance_m = 200
+```
+
+### 4. Important: do not judge overlap from the camera RGB image
+
+The in-scene frustum overlay under:
+
+```text
+/World/CameraFrustums
+```
+
+is renderable debug geometry.
+
+If you look through the same camera that owns the frustum, the far-plane rectangle is projected near the image boundary. At large distances it may be clipped, partially hidden, too thin to see clearly, or outside the visible raster due to exact projection/antialiasing. It is not a good stereo-overlap diagnostic.
+
+Use the `camera_rig_layout.svg` / dashboard Camera layout tab for geometric interpretation. Use in-scene frustums only from the Isaac perspective viewport while tuning camera pose.
+
+### 5. Do not enable frustums for clean dataset capture
+
+Frustum lines are visible renderable geometry. If enabled, they can appear in:
+
+```text
+camera_main/rgb_*.png
+camera_secondary/rgb_*.png
+```
+
+Keep this unchecked for final datasets:
+
+```text
+Show camera frustum rectangles/rays in Isaac viewport = false
+```
+
+Enable it only for short tuning/debugging runs.
+
+## Test procedure
+
+1. Replace the files.
+
+2. Run the GUI/Isaac producer normally:
+
+```powershell
+cd C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac
+C:\Users\Admin\anaconda3\envs\env_isaaclab\python.exe main.py
+```
+
+3. Use a short run first:
+
+```text
+num_frames = 60
+```
+
+4. For clean RGB capture, keep:
+
+```text
+Show camera frustum rectangles/rays = false
+```
+
+5. For geometry tuning only, enable frustums and set:
+
+```text
+Frustum distance [m] = 20, 50, 100, or 200
+```
+
+6. After the run, check:
+
+```text
+outputs/<scene>/camera_rig_layout.svg
+outputs/<scene>/camera_rig_layout.json
+outputs/<scene>/camera_main/last_frame.png
+outputs/<scene>/camera_secondary/last_frame.png
+```
+
+7. Run the dashboard:
+
+```powershell
+cd C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac
+C:\Users\Admin\anaconda3\envs\main\python.exe -m streamlit run dashboard_streamlit.py
+```
+
+8. In the dashboard:
+
+```text
+- select the scene output folder
+- use Swap camera columns if needed
+- open Camera layout tab
+- inspect approximate stereo overlap in camera_rig_layout.svg
+```
+
+## Expected result
+
+```text
+- dashboard camera columns can be swapped without changing data
+- camera_rig_layout.svg shows full configured frustum wedges in top-down XY
+- dashboard has a Camera layout tab
+- RGB images remain clean when frustum overlays are disabled
+```
+
+## Files not changed
+
+The GUI scene manager, profile normalization, asset loader, and environment loader files from v17 are unchanged by v18.
+

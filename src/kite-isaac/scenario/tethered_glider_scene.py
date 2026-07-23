@@ -118,6 +118,9 @@ def run_tethered_glider_scene(
     if camera_enabled:
         print(f"Camera orientation mode: {camera_rig_cfg['orientation_mode']}")
         print(f"Show camera markers in viewport: {camera_rig_cfg.get('show_markers', True)}")
+        print(f"Show camera frustums in viewport: {camera_rig_cfg.get('show_frustums', False)}")
+        print(f"Camera horizontal FOV deg: {float(camera_rig_cfg.get('horizontal_fov_deg', 0.0)):.3f}")
+        print(f"Camera effective focal length mm: {float(camera_rig_cfg.get('focal_length', 0.0)):.3f}")
         print(f"Camera look_at target: {camera_rig_cfg['look_at']}")
         print(f"Main camera marker: BLUE")
         print(f"Secondary camera marker: ORANGE")
@@ -223,6 +226,12 @@ def run_tethered_glider_scene(
                     camera_rig_cfg=camera_rig_cfg,
                     camera_defs=camera_defs,
                 )
+                write_camera_rig_layout_files(
+                    output_dir=output_dir,
+                    scene_config=scene_config,
+                    camera_rig_cfg=camera_rig_cfg,
+                    camera_defs=camera_defs,
+                )
 
                 if bool(capture_cfg.get("rename_after_capture", False)):
                     timestamp_saved_rgb_images(
@@ -309,6 +318,7 @@ def create_two_camera_capture(
     settings.set("/omni/replicator/backends/disk/root_dir", str(output_root.resolve()))
 
     focal_length = float(camera_rig_cfg["focal_length"])
+    horizontal_aperture = float(camera_rig_cfg.get("horizontal_aperture_mm", 20.955))
     resolution = tuple(int(value) for value in camera_rig_cfg["resolution"])
     orientation_mode = str(camera_rig_cfg["orientation_mode"])
     look_at = tuple(float(value) for value in camera_rig_cfg["look_at"])
@@ -321,6 +331,7 @@ def create_two_camera_capture(
                 position=tuple(camera_def["position"]),
                 look_at=look_at,
                 focal_length=focal_length,
+                horizontal_aperture=horizontal_aperture,
             )
         elif orientation_mode == "parallel_manual":
             # Do not pass Euler rotations directly here. Isaac/Replicator camera
@@ -333,6 +344,7 @@ def create_two_camera_capture(
                 position=tuple(camera_def["position"]),
                 look_at=tuple(camera_def["parallel_look_at"]),
                 focal_length=focal_length,
+                horizontal_aperture=horizontal_aperture,
             )
         else:
             raise ValueError(f"Unsupported camera orientation mode: {orientation_mode}")
@@ -379,6 +391,9 @@ def create_two_camera_capture(
     print(f"orientation mode: {orientation_mode}")
     print(f"look_at target: {look_at}")
     print(f"resolution: {resolution}")
+    print(f"horizontal FOV deg: {float(camera_rig_cfg.get('horizontal_fov_deg', 0.0)):.3f}")
+    print(f"horizontal aperture mm: {horizontal_aperture:.3f}")
+    print(f"effective focal length mm: {focal_length:.3f}")
     print(f"output directory: {output_dir.resolve()}")
     print(f"main camera output: {(output_dir / 'camera_main').resolve()}")
     print(f"secondary camera output: {(output_dir / 'camera_secondary').resolve()}")
@@ -420,12 +435,207 @@ def write_capture_metadata(
             "camera_secondary uses the orange marker and outputs to camera_secondary/.",
             "look_at_target is toe-in stereo. parallel_manual is better for basic rectified stereo assumptions.",
             "Camera debug markers are controlled only by camera_rig.show_markers; they are not automatically hidden during capture.",
+            "Camera frustum overlays are renderable debug geometry when camera_rig.show_frustums=true. Keep them off for clean RGB datasets.",
         ],
     }
 
     with open(output_dir / "camera_rig_metadata.json", "w", encoding="utf-8") as file:
         json.dump(metadata, file, indent=2)
 
+
+def write_camera_rig_layout_files(
+    output_dir: Path,
+    scene_config: dict[str, Any],
+    camera_rig_cfg: dict[str, Any],
+    camera_defs: list[dict[str, Any]],
+) -> None:
+    """Write a simple top-down SVG and JSON camera layout diagnostic."""
+    anchor = [float(value) for value in scene_config.get("anchor_position", [0.0, 0.0, 0.0])]
+    look_at = [float(value) for value in camera_rig_cfg.get("look_at", [0.0, 0.0, 1.5])]
+    tether = float(scene_config.get("tether_length_m", 0.0))
+
+    payload = {
+        "scene_name": str(scene_config.get("scene_name", "")),
+        "camera_rig": camera_rig_cfg,
+        "camera_definitions": camera_defs,
+        "anchor_position": anchor,
+        "look_at": look_at,
+        "tether_length_m": tether,
+        "notes": [
+            "Top-down diagnostic only; it is not a calibrated camera model.",
+            "Use camera_rig_metadata.json and frame_state.csv as numeric sources of truth.",
+        ],
+    }
+    with open(output_dir / "camera_rig_layout.json", "w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2)
+
+    svg = build_camera_layout_svg(scene_config, camera_rig_cfg, camera_defs)
+    (output_dir / "camera_rig_layout.svg").write_text(svg, encoding="utf-8")
+
+
+def build_camera_layout_svg(
+    scene_config: dict[str, Any],
+    camera_rig_cfg: dict[str, Any],
+    camera_defs: list[dict[str, Any]],
+) -> str:
+    """Build a top-down camera layout SVG.
+
+    This diagram is deliberately separate from the renderable Isaac frustum
+    overlays. It is the correct diagnostic for camera placement, horizontal FOV,
+    and approximate stereo overlap in the XY plane.
+
+    The in-scene frustum overlay is only viewport debug geometry. Looking through
+    a camera that owns its own frustum is not a useful overlap diagnostic: the
+    far rectangle is projected to the image boundary, and the geometry can also
+    contaminate RGB captures.
+    """
+
+    anchor = [float(value) for value in scene_config.get("anchor_position", [0.0, 0.0, 0.0])]
+    look_at = [float(value) for value in camera_rig_cfg.get("look_at", [0.0, 0.0, 1.5])]
+    tether = float(scene_config.get("tether_length_m", 0.0))
+    hfov = float(camera_rig_cfg.get("horizontal_fov_deg", 33.332))
+    frustum_distance = max(float(camera_rig_cfg.get("frustum_distance_m", 20.0)), 0.1)
+    orientation_mode = str(camera_rig_cfg.get("orientation_mode", "parallel_manual"))
+
+    def camera_target_xy(cam: dict[str, Any]) -> tuple[float, float]:
+        cam_pos = [float(v) for v in cam["position"]]
+        if orientation_mode == "look_at_target":
+            return float(look_at[0]), float(look_at[1])
+        target = cam.get("parallel_look_at", [cam_pos[0] + 1.0, cam_pos[1], cam_pos[2]])
+        return float(target[0]), float(target[1])
+
+    def frustum_xy(cam: dict[str, Any]) -> list[tuple[float, float]]:
+        cam_pos = [float(v) for v in cam["position"]]
+        target_x, target_y = camera_target_xy(cam)
+        dx = target_x - cam_pos[0]
+        dy = target_y - cam_pos[1]
+        norm = math.sqrt(dx * dx + dy * dy)
+        if norm < 1e-9:
+            ux, uy = 1.0, 0.0
+        else:
+            ux, uy = dx / norm, dy / norm
+
+        # Right vector in the XY plane.
+        rx, ry = -uy, ux
+        half_width = math.tan(math.radians(hfov) / 2.0) * frustum_distance
+        cx = cam_pos[0] + ux * frustum_distance
+        cy = cam_pos[1] + uy * frustum_distance
+        left = (cx - rx * half_width, cy - ry * half_width)
+        right = (cx + rx * half_width, cy + ry * half_width)
+        return [(cam_pos[0], cam_pos[1]), left, right]
+
+    def color_rgb(values: Any, fallback: str = "#1f77b4") -> str:
+        if isinstance(values, list) and len(values) == 3:
+            return "#%02x%02x%02x" % tuple(
+                max(0, min(255, int(round(float(v) * 255)))) for v in values
+            )
+        return fallback
+
+    frustums = {str(cam["name"]): frustum_xy(cam) for cam in camera_defs}
+
+    pts: list[tuple[float, float]] = [(anchor[0], anchor[1]), (look_at[0], look_at[1])]
+    for cam in camera_defs:
+        pts.append((float(cam["position"][0]), float(cam["position"][1])))
+        pts.extend(frustums[str(cam["name"])])
+    if tether > 0:
+        pts += [
+            (anchor[0] - tether, anchor[1] - tether),
+            (anchor[0] + tether, anchor[1] + tether),
+        ]
+
+    min_x = min(x for x, _ in pts) - 2.0
+    max_x = max(x for x, _ in pts) + 2.0
+    min_y = min(y for _, y in pts) - 2.0
+    max_y = max(y for _, y in pts) + 2.0
+    width = 1200
+    height = 780
+    pad = 80
+
+    def sx(x: float) -> float:
+        return pad + (x - min_x) / max(max_x - min_x, 1e-6) * (width - 2 * pad)
+
+    def sy(y: float) -> float:
+        return height - (pad + (y - min_y) / max(max_y - min_y, 1e-6) * (height - 2 * pad))
+
+    def polygon_points(points: list[tuple[float, float]]) -> str:
+        return " ".join(f"{sx(x):.1f},{sy(y):.1f}" for x, y in points)
+
+    elements: list[str] = []
+    elements.append(
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">'
+    )
+    elements.append('<rect width="100%" height="100%" fill="white"/>')
+    elements.append(
+        '<text x="30" y="35" font-size="22" font-family="Arial" fill="black">Stereo camera top-down layout</text>'
+    )
+    elements.append(
+        '<text x="30" y="62" font-size="13" font-family="Arial" fill="#555">'
+        f'XY diagnostic. Horizontal FOV={hfov:.2f} deg, frustum distance={frustum_distance:.2f} m. '
+        'Transparent wedges show approximate top-down view overlap.</text>'
+    )
+    elements.append(
+        '<text x="30" y="82" font-size="12" font-family="Arial" fill="#777">'
+        'Do not judge overlap from RGB images containing frustum debug geometry. Use this SVG/JSON instead.</text>'
+    )
+
+    # Tether circle / orbit footprint.
+    if tether > 0:
+        rx = abs(sx(anchor[0] + tether) - sx(anchor[0]))
+        ry = abs(sy(anchor[1] + tether) - sy(anchor[1]))
+        elements.append(
+            f'<ellipse cx="{sx(anchor[0]):.1f}" cy="{sy(anchor[1]):.1f}" rx="{rx:.1f}" ry="{ry:.1f}" '
+            'fill="none" stroke="#777" stroke-dasharray="6,6" stroke-width="2"/>'
+        )
+
+    # Draw frustum wedges first so markers remain visible. Overlap appears by transparency blending.
+    for cam in camera_defs:
+        color = color_rgb(cam.get("frustum_color", cam.get("marker_color")))
+        pts_svg = polygon_points(frustums[str(cam["name"])])
+        elements.append(
+            f'<polygon points="{pts_svg}" fill="{color}" fill-opacity="0.18" stroke="{color}" stroke-width="2"/>'
+        )
+        far_left, far_right = frustums[str(cam["name"])][1], frustums[str(cam["name"])][2]
+        elements.append(
+            f'<line x1="{sx(far_left[0]):.1f}" y1="{sy(far_left[1]):.1f}" '
+            f'x2="{sx(far_right[0]):.1f}" y2="{sy(far_right[1]):.1f}" stroke="{color}" stroke-width="4"/>'
+        )
+
+    # Anchor/look-at target.
+    elements.append(f'<circle cx="{sx(anchor[0]):.1f}" cy="{sy(anchor[1]):.1f}" r="7" fill="#222"/>')
+    elements.append(
+        f'<text x="{sx(anchor[0])+10:.1f}" y="{sy(anchor[1])-10:.1f}" font-size="14" font-family="Arial">Anchor</text>'
+    )
+    elements.append(f'<circle cx="{sx(look_at[0]):.1f}" cy="{sy(look_at[1]):.1f}" r="6" fill="#d62728"/>')
+    elements.append(
+        f'<text x="{sx(look_at[0])+10:.1f}" y="{sy(look_at[1])+5:.1f}" font-size="14" font-family="Arial">Look-at</text>'
+    )
+
+    for cam in camera_defs:
+        cam_pos = [float(v) for v in cam["position"]]
+        color = color_rgb(cam.get("marker_color"))
+        x0, y0 = sx(cam_pos[0]), sy(cam_pos[1])
+        elements.append(
+            f'<rect x="{x0-8:.1f}" y="{y0-8:.1f}" width="16" height="16" '
+            f'transform="rotate(45 {x0:.1f} {y0:.1f})" fill="{color}" stroke="#111" stroke-width="1"/>'
+        )
+        elements.append(
+            f'<text x="{x0+12:.1f}" y="{y0-10:.1f}" font-size="14" font-family="Arial" fill="black">{cam["name"]}</text>'
+        )
+
+    # Simple legend.
+    legend_x = width - 330
+    legend_y = 35
+    elements.append(f'<rect x="{legend_x}" y="{legend_y}" width="300" height="100" fill="white" stroke="#ccc"/>')
+    elements.append(f'<text x="{legend_x+12}" y="{legend_y+24}" font-size="13" font-family="Arial" fill="#333">Legend</text>')
+    elements.append(f'<circle cx="{legend_x+18}" cy="{legend_y+45}" r="6" fill="#222"/>')
+    elements.append(f'<text x="{legend_x+32}" y="{legend_y+50}" font-size="12" font-family="Arial">anchor/orbit center</text>')
+    elements.append(f'<circle cx="{legend_x+18}" cy="{legend_y+68}" r="6" fill="#d62728"/>')
+    elements.append(f'<text x="{legend_x+32}" y="{legend_y+73}" font-size="12" font-family="Arial">look-at/reference point</text>')
+    elements.append(f'<rect x="{legend_x+12}" y="{legend_y+84}" width="12" height="12" transform="rotate(45 {legend_x+18} {legend_y+90})" fill="#777"/>')
+    elements.append(f'<text x="{legend_x+32}" y="{legend_y+96}" font-size="12" font-family="Arial">camera position</text>')
+
+    elements.append('</svg>')
+    return "\n".join(elements)
 
 def load_capture_manifest_map(output_dir: Path) -> dict[str, dict[int, dict[str, str]]]:
     """Return manifest records by camera name and frame index.
@@ -950,7 +1160,8 @@ def compute_two_camera_definitions(camera_rig_cfg: dict[str, Any]) -> list[dict[
     return [
         {
             "name": "camera_main",
-            "marker_color": "blue",
+            "marker_color": main_camera.get("marker_color", [0.05, 0.25, 0.95]),
+            "frustum_color": main_camera.get("frustum_color", main_camera.get("marker_color", [0.05, 0.25, 0.95])),
             "output_folder": "camera_main",
             "position": main_position,
             "rotation_pyr_deg": main_rotation_pyr,
@@ -961,7 +1172,8 @@ def compute_two_camera_definitions(camera_rig_cfg: dict[str, Any]) -> list[dict[
         },
         {
             "name": "camera_secondary",
-            "marker_color": "orange",
+            "marker_color": secondary_camera.get("marker_color", [0.95, 0.45, 0.05]),
+            "frustum_color": secondary_camera.get("frustum_color", secondary_camera.get("marker_color", [0.95, 0.45, 0.05])),
             "output_folder": "camera_secondary",
             "position": secondary_position,
             "rotation_pyr_deg": secondary_rotation_pyr,
@@ -1042,18 +1254,21 @@ def create_camera_markers(
 
     UsdGeom.Xform.Define(stage, "/World/CameraMarkers")
 
+    main_color = tuple(float(value) for value in camera_defs[0].get("marker_color", [0.05, 0.25, 0.95]))
+    secondary_color = tuple(float(value) for value in camera_defs[1].get("marker_color", [0.95, 0.45, 0.05]))
+
     main_material = make_material(
         stage,
-        "/World/Materials/MainCameraBlueMat",
-        color=(0.05, 0.25, 0.95),
+        "/World/Materials/MainCameraMarkerMat",
+        color=main_color,
         roughness=0.45,
         metallic=0.0,
     )
 
     secondary_material = make_material(
         stage,
-        "/World/Materials/SecondaryCameraOrangeMat",
-        color=(0.95, 0.45, 0.05),
+        "/World/Materials/SecondaryCameraMarkerMat",
+        color=secondary_color,
         roughness=0.45,
         metallic=0.0,
     )
@@ -1066,7 +1281,27 @@ def create_camera_markers(
         metallic=0.1,
     )
 
+    main_frustum_color = tuple(float(value) for value in camera_defs[0].get("frustum_color", camera_defs[0].get("marker_color", [0.05, 0.25, 0.95])))
+    secondary_frustum_color = tuple(float(value) for value in camera_defs[1].get("frustum_color", camera_defs[1].get("marker_color", [0.95, 0.45, 0.05])))
+
+    main_frustum_material = make_material(
+        stage,
+        "/World/Materials/MainCameraFrustumMat",
+        color=main_frustum_color,
+        roughness=0.5,
+        metallic=0.0,
+    )
+
+    secondary_frustum_material = make_material(
+        stage,
+        "/World/Materials/SecondaryCameraFrustumMat",
+        color=secondary_frustum_color,
+        roughness=0.5,
+        metallic=0.0,
+    )
+
     marker_materials = [main_material, secondary_material]
+    frustum_materials = [main_frustum_material, secondary_frustum_material]
 
     for index, camera_def in enumerate(camera_defs):
         position = camera_def["position"]
@@ -1088,6 +1323,14 @@ def create_camera_markers(
 
         # Do not create a renderable aim-line from the camera to the target.
         # It is useful for debugging but can cross the camera frustum and contaminate RGB output.
+
+    if bool(camera_rig_cfg.get("show_frustums", False)):
+        create_camera_frustum_overlays(
+            stage=stage,
+            camera_rig_cfg=camera_rig_cfg,
+            camera_defs=camera_defs,
+            materials=frustum_materials,
+        )
 
     set_camera_markers_visible(
         stage=stage,
@@ -1187,6 +1430,91 @@ def create_camera_aim_line(
         ]
     )
     curve.CreateWidthsAttr([0.01, 0.01])
+    bind_material(curve.GetPrim(), material)
+
+
+def normalize_vec3(vec: list[float] | tuple[float, float, float]) -> list[float]:
+    norm = math.sqrt(float(vec[0]) ** 2 + float(vec[1]) ** 2 + float(vec[2]) ** 2)
+    if norm < 1e-12:
+        return [0.0, 0.0, 0.0]
+    return [float(vec[0]) / norm, float(vec[1]) / norm, float(vec[2]) / norm]
+
+
+def cross_vec3(a: list[float], b: list[float]) -> list[float]:
+    return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+
+
+def create_camera_frustum_overlays(
+    stage: Usd.Stage,
+    camera_rig_cfg: dict[str, Any],
+    camera_defs: list[dict[str, Any]],
+    materials: list[UsdShade.Material],
+) -> None:
+    """Create renderable camera-frustum debug wireframes.
+
+    These are deliberately renderable because they are viewport/debug objects.
+    Keep camera_rig.show_frustums=false for clean RGB capture datasets.
+    """
+
+    UsdGeom.Xform.Define(stage, "/World/CameraFrustums")
+
+    resolution = camera_rig_cfg.get("resolution", [1280, 720])
+    aspect = float(resolution[0]) / max(float(resolution[1]), 1.0)
+    horizontal_fov_rad = math.radians(float(camera_rig_cfg.get("horizontal_fov_deg", 33.332)))
+    far_distance = float(camera_rig_cfg.get("frustum_distance_m", 4.0))
+    far_distance = max(far_distance, 0.1)
+    line_width = float(camera_rig_cfg.get("frustum_line_width_m", 0.025))
+    line_width = max(line_width, 0.001)
+
+    half_width = math.tan(horizontal_fov_rad / 2.0) * far_distance
+    half_height = half_width / max(aspect, 1e-6)
+
+    for index, camera_def in enumerate(camera_defs):
+        origin = [float(value) for value in camera_def["position"]]
+        if str(camera_rig_cfg.get("orientation_mode", "parallel_manual")) == "look_at_target":
+            target = [float(value) for value in camera_rig_cfg.get("look_at", [0.0, 0.0, 1.5])]
+        else:
+            target = [float(value) for value in camera_def.get("parallel_look_at", [origin[0] + 1.0, origin[1], origin[2]])]
+
+        forward = normalize_vec3([target[0] - origin[0], target[1] - origin[1], target[2] - origin[2]])
+        world_up = [0.0, 0.0, 1.0]
+        right = normalize_vec3(cross_vec3(forward, world_up))
+        if abs(right[0]) + abs(right[1]) + abs(right[2]) < 1e-9:
+            right = [1.0, 0.0, 0.0]
+        up = normalize_vec3(cross_vec3(right, forward))
+
+        center = [origin[i] + forward[i] * far_distance for i in range(3)]
+        corners = [
+            [center[i] - right[i] * half_width + up[i] * half_height for i in range(3)],
+            [center[i] + right[i] * half_width + up[i] * half_height for i in range(3)],
+            [center[i] + right[i] * half_width - up[i] * half_height for i in range(3)],
+            [center[i] - right[i] * half_width - up[i] * half_height for i in range(3)],
+        ]
+
+        base_path = f"/World/CameraFrustums/{camera_def['name']}"
+        UsdGeom.Xform.Define(stage, base_path)
+        material = materials[index]
+        create_polyline_curve(stage, f"{base_path}/FarRectangle", corners + [corners[0]], material, width=line_width)
+        for corner_index, corner in enumerate(corners):
+            create_polyline_curve(stage, f"{base_path}/Ray{corner_index}", [origin, corner], material, width=line_width)
+
+
+def create_polyline_curve(
+    stage: Usd.Stage,
+    path: str,
+    points: list[list[float]],
+    material: UsdShade.Material,
+    width: float = 0.02,
+) -> None:
+    curve = UsdGeom.BasisCurves.Define(stage, path)
+    curve.CreateTypeAttr("linear")
+    curve.CreateCurveVertexCountsAttr([len(points)])
+    curve.CreatePointsAttr([Gf.Vec3f(float(p[0]), float(p[1]), float(p[2])) for p in points])
+    curve.CreateWidthsAttr([float(width)] * len(points))
     bind_material(curve.GetPrim(), material)
 
 

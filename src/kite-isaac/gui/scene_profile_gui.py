@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import shutil
 import tkinter as tk
 from pathlib import Path
@@ -25,6 +27,7 @@ from utils.profile_io import (
     GLIDER_ASSET_MODES,
     normalize_environment,
     compute_parallel_rig_pitch_yaw_roll_deg,
+    focal_length_mm_from_horizontal_fov,
     default_profile_path,
     load_json_profile,
     normalize_camera_rig,
@@ -91,8 +94,9 @@ class ScrollableFrame(ttk.Frame):
 class SceneProfileGui:
     def __init__(self, project_root: Path, initial_profile_path: Path):
         self.project_root = project_root
-        self.initial_profile_path = initial_profile_path
-        self.current_profile_path = initial_profile_path
+        self.available_scene_profiles = self._load_available_scene_profiles()
+        self.initial_profile_path = self._resolve_initial_profile_path(initial_profile_path)
+        self.current_profile_path = self.initial_profile_path
         self.result: dict[str, Any] | None = None
         self.available_glider_asset_ids = self._load_available_glider_asset_ids()
         self.available_environment_asset_ids = self._load_available_environment_asset_ids()
@@ -105,13 +109,74 @@ class SceneProfileGui:
         self._build_variables()
         self._build_layout()
 
-        profile = load_json_profile(initial_profile_path)
+        profile = load_json_profile(self.initial_profile_path)
         validate_tethered_glider_profile(profile)
         self._load_profile_into_gui(profile)
 
     def run(self) -> dict[str, Any] | None:
         self.root.mainloop()
         return self.result
+
+    def _gui_state_path(self) -> Path:
+        return self.project_root / "profiles" / "_gui_state.json"
+
+    def _read_gui_state(self) -> dict[str, Any]:
+        path = self._gui_state_path()
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _write_gui_state(self, profile_path: Path, profile: dict[str, Any]) -> None:
+        payload = {
+            "last_profile_path": str(profile_path.resolve()),
+            "last_scene_name": str(profile.get("scene_name", "")),
+        }
+        path = self._gui_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def _load_available_scene_profiles(self) -> dict[str, Path]:
+        profiles_dir = self.project_root / "profiles"
+        mapping: dict[str, Path] = {}
+        if not profiles_dir.exists():
+            return mapping
+
+        for path in sorted(profiles_dir.glob("*.json")):
+            if path.name.startswith("_"):
+                continue
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                scene_name = str(data.get("scene_name", "")).strip()
+                if scene_name:
+                    mapping[scene_name] = path.resolve()
+        return mapping
+
+    def _resolve_initial_profile_path(self, fallback_profile_path: Path) -> Path:
+        state = self._read_gui_state()
+        last_profile_raw = str(state.get("last_profile_path", "")).strip()
+        if last_profile_raw:
+            last_profile = Path(last_profile_raw)
+            if last_profile.exists() and last_profile.is_file():
+                return last_profile.resolve()
+
+        last_scene_name = str(state.get("last_scene_name", "")).strip()
+        if last_scene_name in self.available_scene_profiles:
+            return self.available_scene_profiles[last_scene_name]
+
+        return fallback_profile_path.resolve()
+
+    def _refresh_scene_profile_list(self) -> None:
+        self.available_scene_profiles = self._load_available_scene_profiles()
+        values = sorted(self.available_scene_profiles.keys())
+        if hasattr(self, "scene_selector_combo"):
+            self.scene_selector_combo.configure(values=values, state="readonly" if values else "normal")
 
     def _load_available_glider_asset_ids(self) -> list[str]:
         try:
@@ -148,6 +213,7 @@ class SceneProfileGui:
 
     def _build_variables(self) -> None:
         self.scene_name = tk.StringVar()
+        self.selected_scene_name = tk.StringVar()
 
         self.anchor_x = tk.DoubleVar()
         self.anchor_y = tk.DoubleVar()
@@ -194,12 +260,17 @@ class SceneProfileGui:
 
         self.camera_enabled = tk.BooleanVar()
         self.camera_show_markers = tk.BooleanVar()
+        self.camera_show_frustums = tk.BooleanVar()
+        self.camera_frustum_distance_m = tk.DoubleVar()
+        self.camera_frustum_line_width_m = tk.DoubleVar()
         self.camera_orientation_mode = tk.StringVar()
         self.last_camera_orientation_snapshot: dict[str, Any] | None = None
 
         self.main_camera_x = tk.DoubleVar()
         self.main_camera_y = tk.DoubleVar()
         self.main_camera_z = tk.DoubleVar()
+        self.main_camera_color_hex = tk.StringVar()
+        self.main_frustum_color_hex = tk.StringVar()
 
         self.main_pitch_deg = tk.DoubleVar()
         self.main_yaw_deg = tk.DoubleVar()
@@ -208,6 +279,8 @@ class SceneProfileGui:
         self.secondary_offset_x = tk.DoubleVar()
         self.secondary_offset_y = tk.DoubleVar()
         self.secondary_offset_z = tk.DoubleVar()
+        self.secondary_camera_color_hex = tk.StringVar()
+        self.secondary_frustum_color_hex = tk.StringVar()
 
         self.secondary_pitch_offset_deg = tk.DoubleVar()
         self.secondary_yaw_offset_deg = tk.DoubleVar()
@@ -217,6 +290,8 @@ class SceneProfileGui:
         self.camera_look_y = tk.DoubleVar()
         self.camera_look_z = tk.DoubleVar()
 
+        self.camera_horizontal_fov_deg = tk.DoubleVar()
+        self.camera_horizontal_aperture_mm = tk.DoubleVar()
         self.camera_focal_length = tk.DoubleVar()
         self.camera_resolution_width = tk.IntVar()
         self.camera_resolution_height = tk.IntVar()
@@ -304,7 +379,27 @@ class SceneProfileGui:
         parent.configure(padding=12)
         row = 0
 
-        ttk.Label(parent, text="Scene name").grid(row=row, column=0, sticky="w")
+        ttk.Label(parent, text="Existing scene profile").grid(row=row, column=0, sticky="w")
+        scene_selector = ttk.Frame(parent)
+        scene_selector.grid(row=row, column=1, sticky="ew", padx=8, pady=4)
+        scene_selector.columnconfigure(0, weight=1)
+        self.scene_selector_combo = ttk.Combobox(
+            scene_selector,
+            textvariable=self.selected_scene_name,
+            values=sorted(self.available_scene_profiles.keys()),
+            state="readonly" if self.available_scene_profiles else "normal",
+            width=34,
+        )
+        self.scene_selector_combo.grid(row=0, column=0, sticky="ew")
+        self.scene_selector_combo.bind("<<ComboboxSelected>>", self._on_scene_selected)
+        ttk.Button(
+            scene_selector,
+            text="Refresh",
+            command=self._on_refresh_scene_profiles,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        row += 1
+
+        ttk.Label(parent, text="Scene name / new scene name").grid(row=row, column=0, sticky="w")
         ttk.Entry(parent, textvariable=self.scene_name, width=36).grid(
             row=row,
             column=1,
@@ -312,6 +407,18 @@ class SceneProfileGui:
             padx=8,
             pady=4,
         )
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "Pick an existing scene profile from the dropdown to load it. "
+                "Edit the scene name textbox to save/run a new scene profile. "
+                "The last run/saved profile is loaded by default the next time this GUI opens."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
         row += 1
 
         ttk.Separator(parent).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10)
@@ -592,6 +699,22 @@ class SceneProfileGui:
         ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 6))
         row += 1
 
+        ttk.Checkbutton(
+            parent,
+            text="Show camera frustum rectangles/rays in Isaac viewport (debug only; visible in RGB if enabled)",
+            variable=self.camera_show_frustums,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        row += 1
+
+        self._add_float_row(parent, row, "Frustum distance [m]", self.camera_frustum_distance_m)
+        row += 1
+        self._add_float_row(parent, row, "Frustum line width [m]", self.camera_frustum_line_width_m)
+        row += 1
+        self._add_color_row(parent, row, "Main frustum color", self.main_frustum_color_hex, self._on_pick_main_frustum_color)
+        row += 1
+        self._add_color_row(parent, row, "Secondary frustum color", self.secondary_frustum_color_hex, self._on_pick_secondary_frustum_color)
+        row += 1
+
         ttk.Label(parent, text="Orientation mode").grid(row=row, column=0, sticky="w")
         mode_box = ttk.Combobox(
             parent,
@@ -649,6 +772,8 @@ class SceneProfileGui:
         row += 1
         self._add_float_row(parent, row, "Main camera Z [m]", self.main_camera_z)
         row += 1
+        self._add_color_row(parent, row, "Main camera marker color", self.main_camera_color_hex, self._on_pick_main_camera_color)
+        row += 1
 
         self._add_float_row(parent, row, "Main pitch [deg]", self.main_pitch_deg)
         row += 1
@@ -673,6 +798,8 @@ class SceneProfileGui:
         row += 1
         self._add_float_row(parent, row, "Secondary Z offset [m]", self.secondary_offset_z)
         row += 1
+        self._add_color_row(parent, row, "Secondary camera marker color", self.secondary_camera_color_hex, self._on_pick_secondary_camera_color)
+        row += 1
 
         self._add_float_row(parent, row, "Secondary pitch offset [deg]", self.secondary_pitch_offset_deg)
         row += 1
@@ -696,7 +823,28 @@ class SceneProfileGui:
         self._add_float_row(parent, row, "Look-at Z [m]", self.camera_look_z)
         row += 1
 
-        self._add_float_row(parent, row, "Focal length", self.camera_focal_length)
+        self._add_float_row(parent, row, "Horizontal FOV [deg]", self.camera_horizontal_fov_deg)
+        row += 1
+        self._add_float_row(parent, row, "Horizontal aperture [mm]", self.camera_horizontal_aperture_mm)
+        row += 1
+        self._add_float_row(parent, row, "Derived focal length [mm]", self.camera_focal_length)
+        row += 1
+        ttk.Button(
+            parent,
+            text="Recompute focal length from FOV",
+            command=self._on_update_focal_from_fov,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 6))
+        row += 1
+        ttk.Label(
+            parent,
+            text=(
+                "Edit horizontal FOV. The derived focal length is still saved because Replicator uses focal_length internally. "
+                "Default USD/Replicator horizontal aperture is 20.955 mm. "
+                "focal_length = horizontal_aperture / (2 * tan(horizontal_fov / 2))."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
         row += 1
         self._add_int_row(parent, row, "Resolution width", self.camera_resolution_width)
         row += 1
@@ -786,6 +934,54 @@ class SceneProfileGui:
             width=16,
         )
         spinbox.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+
+    def _add_color_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, command: Any) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w")
+        frame = ttk.Frame(parent)
+        frame.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+
+        def current_background() -> str:
+            try:
+                return self._normalize_hex_color(variable.get())
+            except Exception:
+                return "#ffffff"
+
+        preview = tk.Label(
+            frame,
+            textvariable=variable,
+            width=12,
+            relief="solid",
+            borderwidth=1,
+            background=current_background(),
+        )
+        preview.pack(side="left")
+
+        def update_preview(*_args: Any) -> None:
+            preview.configure(background=current_background())
+
+        variable.trace_add("write", update_preview)
+        ttk.Button(frame, text="Pick", command=command).pack(side="left", padx=(6, 0))
+
+    def _on_refresh_scene_profiles(self) -> None:
+        self._refresh_scene_profile_list()
+        self.status_text.set(
+            "Loaded scene profiles: "
+            + (", ".join(sorted(self.available_scene_profiles.keys())) if self.available_scene_profiles else "none")
+        )
+
+    def _on_scene_selected(self, _event: tk.Event | None = None) -> None:
+        scene_name = self.selected_scene_name.get().strip()
+        profile_path = self.available_scene_profiles.get(scene_name)
+        if profile_path is None:
+            return
+        try:
+            profile = load_json_profile(profile_path)
+            validate_tethered_glider_profile(profile)
+            self.current_profile_path = profile_path
+            self._load_profile_into_gui(profile)
+            self.status_text.set(f"Loaded scene profile: {profile_path}")
+        except Exception as exc:
+            messagebox.showerror("Load scene profile failed", str(exc))
 
     def _on_refresh_glider_asset_list(self) -> None:
         self.available_glider_asset_ids = self._load_available_glider_asset_ids()
@@ -882,6 +1078,37 @@ class SceneProfileGui:
 
         return f"#{channels[0]:02x}{channels[1]:02x}{channels[2]:02x}"
 
+    def _on_update_focal_from_fov(self) -> None:
+        try:
+            focal = focal_length_mm_from_horizontal_fov(
+                float(self.camera_horizontal_fov_deg.get()),
+                float(self.camera_horizontal_aperture_mm.get()),
+            )
+            self.camera_focal_length.set(float(focal))
+            self.status_text.set(f"Derived focal length updated from horizontal FOV: {focal:.3f} mm")
+        except Exception as exc:
+            messagebox.showerror("FOV conversion failed", str(exc))
+
+    def _on_pick_main_camera_color(self) -> None:
+        color = colorchooser.askcolor(color=self.main_camera_color_hex.get(), title="Pick main camera marker color")
+        if color and color[1]:
+            self.main_camera_color_hex.set(self._normalize_hex_color(color[1]))
+
+    def _on_pick_secondary_camera_color(self) -> None:
+        color = colorchooser.askcolor(color=self.secondary_camera_color_hex.get(), title="Pick secondary camera marker color")
+        if color and color[1]:
+            self.secondary_camera_color_hex.set(self._normalize_hex_color(color[1]))
+
+    def _on_pick_main_frustum_color(self) -> None:
+        color = colorchooser.askcolor(color=self.main_frustum_color_hex.get(), title="Pick main camera frustum color")
+        if color and color[1]:
+            self.main_frustum_color_hex.set(self._normalize_hex_color(color[1]))
+
+    def _on_pick_secondary_frustum_color(self) -> None:
+        color = colorchooser.askcolor(color=self.secondary_frustum_color_hex.get(), title="Pick secondary camera frustum color")
+        if color and color[1]:
+            self.secondary_frustum_color_hex.set(self._normalize_hex_color(color[1]))
+
     @staticmethod
     def _hex_to_rgb_float(color_hex: str) -> list[float]:
         normalized = SceneProfileGui._normalize_hex_color(color_hex)
@@ -904,6 +1131,7 @@ class SceneProfileGui:
         glider_asset["material_override"] = material_override
 
         self.scene_name.set(str(profile["scene_name"]))
+        self.selected_scene_name.set(str(profile["scene_name"]))
 
         anchor = profile["anchor_position"]
         self.anchor_x.set(float(anchor[0]))
@@ -959,6 +1187,9 @@ class SceneProfileGui:
 
         self.camera_enabled.set(bool(camera_rig["enabled"]))
         self.camera_show_markers.set(bool(camera_rig.get("show_markers", True)))
+        self.camera_show_frustums.set(bool(camera_rig.get("show_frustums", False)))
+        self.camera_frustum_distance_m.set(float(camera_rig.get("frustum_distance_m", 4.0)))
+        self.camera_frustum_line_width_m.set(float(camera_rig.get("frustum_line_width_m", 0.025)))
         self.camera_orientation_mode.set(str(camera_rig["orientation_mode"]))
 
         main_camera = camera_rig["main_camera"]
@@ -970,6 +1201,8 @@ class SceneProfileGui:
         self.main_camera_x.set(float(main_position[0]))
         self.main_camera_y.set(float(main_position[1]))
         self.main_camera_z.set(float(main_position[2]))
+        self.main_camera_color_hex.set(self._rgb_float_to_hex(main_camera.get("marker_color", [0.05, 0.25, 0.95])))
+        self.main_frustum_color_hex.set(self._rgb_float_to_hex(main_camera.get("frustum_color", main_camera.get("marker_color", [0.05, 0.25, 0.95]))))
 
         self.main_pitch_deg.set(float(main_rotation[0]))
         self.main_yaw_deg.set(float(main_rotation[1]))
@@ -981,6 +1214,8 @@ class SceneProfileGui:
         self.secondary_offset_x.set(float(secondary_position_offset[0]))
         self.secondary_offset_y.set(float(secondary_position_offset[1]))
         self.secondary_offset_z.set(float(secondary_position_offset[2]))
+        self.secondary_camera_color_hex.set(self._rgb_float_to_hex(secondary_camera.get("marker_color", [0.95, 0.45, 0.05])))
+        self.secondary_frustum_color_hex.set(self._rgb_float_to_hex(secondary_camera.get("frustum_color", secondary_camera.get("marker_color", [0.95, 0.45, 0.05]))))
 
         self.secondary_pitch_offset_deg.set(float(secondary_rotation_offset[0]))
         self.secondary_yaw_offset_deg.set(float(secondary_rotation_offset[1]))
@@ -993,6 +1228,8 @@ class SceneProfileGui:
         self.camera_look_y.set(float(look_at[1]))
         self.camera_look_z.set(float(look_at[2]))
 
+        self.camera_horizontal_fov_deg.set(float(camera_rig.get("horizontal_fov_deg", 33.332)))
+        self.camera_horizontal_aperture_mm.set(float(camera_rig.get("horizontal_aperture_mm", 20.955)))
         self.camera_focal_length.set(float(camera_rig["focal_length"]))
 
         self.camera_resolution_width.set(int(resolution[0]))
@@ -1066,9 +1303,14 @@ class SceneProfileGui:
             "camera_rig": {
                 "enabled": bool(self.camera_enabled.get()),
                 "show_markers": bool(self.camera_show_markers.get()),
+                "show_frustums": bool(self.camera_show_frustums.get()),
+                "frustum_distance_m": float(self.camera_frustum_distance_m.get()),
+                "frustum_line_width_m": float(self.camera_frustum_line_width_m.get()),
                 "orientation_mode": self.camera_orientation_mode.get().strip(),
                 "main_camera": {
                     "label": "main_camera_blue",
+                    "marker_color": self._hex_to_rgb_float(self.main_camera_color_hex.get()),
+                    "frustum_color": self._hex_to_rgb_float(self.main_frustum_color_hex.get()),
                     "position": [
                         float(self.main_camera_x.get()),
                         float(self.main_camera_y.get()),
@@ -1082,6 +1324,8 @@ class SceneProfileGui:
                 },
                 "secondary_camera": {
                     "label": "secondary_camera_orange",
+                    "marker_color": self._hex_to_rgb_float(self.secondary_camera_color_hex.get()),
+                    "frustum_color": self._hex_to_rgb_float(self.secondary_frustum_color_hex.get()),
                     "position_offset": [
                         float(self.secondary_offset_x.get()),
                         float(self.secondary_offset_y.get()),
@@ -1098,7 +1342,12 @@ class SceneProfileGui:
                     float(self.camera_look_y.get()),
                     float(self.camera_look_z.get()),
                 ],
-                "focal_length": float(self.camera_focal_length.get()),
+                "horizontal_fov_deg": float(self.camera_horizontal_fov_deg.get()),
+                "horizontal_aperture_mm": float(self.camera_horizontal_aperture_mm.get()),
+                "focal_length": focal_length_mm_from_horizontal_fov(
+                    float(self.camera_horizontal_fov_deg.get()),
+                    float(self.camera_horizontal_aperture_mm.get()),
+                ),
                 "resolution": [
                     int(self.camera_resolution_width.get()),
                     int(self.camera_resolution_height.get()),
@@ -1210,11 +1459,16 @@ class SceneProfileGui:
 
         self.camera_enabled.set(bool(default_rig["enabled"]))
         self.camera_show_markers.set(bool(default_rig.get("show_markers", True)))
+        self.camera_show_frustums.set(bool(default_rig.get("show_frustums", False)))
+        self.camera_frustum_distance_m.set(float(default_rig.get("frustum_distance_m", 4.0)))
+        self.camera_frustum_line_width_m.set(float(default_rig.get("frustum_line_width_m", 0.025)))
         self.camera_orientation_mode.set(str(default_rig["orientation_mode"]))
 
         self.main_camera_x.set(float(main_camera["position"][0]))
         self.main_camera_y.set(float(main_camera["position"][1]))
         self.main_camera_z.set(float(main_camera["position"][2]))
+        self.main_camera_color_hex.set(self._rgb_float_to_hex(main_camera.get("marker_color", [0.05, 0.25, 0.95])))
+        self.main_frustum_color_hex.set(self._rgb_float_to_hex(main_camera.get("frustum_color", main_camera.get("marker_color", [0.05, 0.25, 0.95]))))
         self.main_pitch_deg.set(float(main_camera["rotation_deg"][0]))
         self.main_yaw_deg.set(float(main_camera["rotation_deg"][1]))
         self.main_roll_deg.set(float(main_camera["rotation_deg"][2]))
@@ -1222,6 +1476,8 @@ class SceneProfileGui:
         self.secondary_offset_x.set(float(secondary_camera["position_offset"][0]))
         self.secondary_offset_y.set(float(secondary_camera["position_offset"][1]))
         self.secondary_offset_z.set(float(secondary_camera["position_offset"][2]))
+        self.secondary_camera_color_hex.set(self._rgb_float_to_hex(secondary_camera.get("marker_color", [0.95, 0.45, 0.05])))
+        self.secondary_frustum_color_hex.set(self._rgb_float_to_hex(secondary_camera.get("frustum_color", secondary_camera.get("marker_color", [0.95, 0.45, 0.05]))))
         self.secondary_pitch_offset_deg.set(float(secondary_camera["rotation_offset_deg"][0]))
         self.secondary_yaw_offset_deg.set(float(secondary_camera["rotation_offset_deg"][1]))
         self.secondary_roll_offset_deg.set(float(secondary_camera["rotation_offset_deg"][2]))
@@ -1229,6 +1485,8 @@ class SceneProfileGui:
         self.camera_look_x.set(float(default_rig["look_at"][0]))
         self.camera_look_y.set(float(default_rig["look_at"][1]))
         self.camera_look_z.set(float(default_rig["look_at"][2]))
+        self.camera_horizontal_fov_deg.set(float(default_rig.get("horizontal_fov_deg", 33.332)))
+        self.camera_horizontal_aperture_mm.set(float(default_rig.get("horizontal_aperture_mm", 20.955)))
         self.camera_focal_length.set(float(default_rig["focal_length"]))
         self.camera_resolution_width.set(int(default_rig["resolution"][0]))
         self.camera_resolution_height.set(int(default_rig["resolution"][1]))
@@ -1285,6 +1543,152 @@ class SceneProfileGui:
         except Exception as exc:
             messagebox.showerror("Output folder check failed", str(exc))
 
+
+    def _prompt_delete_output_folder_before_run(self) -> bool:
+        """Return True if RUN should continue, False if cancelled."""
+        output_dir = self._get_output_dir_from_gui()
+        if not output_dir.exists():
+            return True
+        if not output_dir.is_dir():
+            messagebox.showerror("Output folder problem", f"Path exists but is not a folder:\n{output_dir}")
+            return False
+
+        answer = messagebox.askyesnocancel(
+            "Existing output folder",
+            (
+                "Output folder already exists:\n\n"
+                f"{output_dir}\n\n"
+                "Delete previous simulation outputs before running?\n\n"
+                "Yes = delete old output folder and run.\n"
+                "No = keep old files and run anyway.\n"
+                "Cancel = do not run."
+            ),
+        )
+        if answer is None:
+            self.status_text.set("Run cancelled before Isaac Sim start.")
+            return False
+        if answer is True:
+            shutil.rmtree(output_dir)
+            self.status_text.set(f"Deleted old output folder before run: {output_dir}")
+        else:
+            self.status_text.set(f"Keeping existing output folder: {output_dir}")
+        return True
+
+    def _write_camera_layout_files_before_run(self, profile: dict[str, Any]) -> None:
+        output_dir = self._get_output_dir_from_gui()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        camera_rig = profile["camera_rig"]
+        camera_defs = self._compute_camera_defs_for_diagram(camera_rig)
+        payload = {
+            "scene_name": profile["scene_name"],
+            "anchor_position": profile["anchor_position"],
+            "tether_length_m": profile["tether_length_m"],
+            "camera_rig": camera_rig,
+            "camera_definitions": camera_defs,
+            "notes": [
+                "Generated by the GUI immediately after clicking RUN.",
+                "This is a top-down diagnostic, not a calibrated projection export.",
+            ],
+        }
+        (output_dir / "camera_rig_layout.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        (output_dir / "camera_rig_layout.svg").write_text(
+            self._build_camera_layout_svg(profile, camera_rig, camera_defs),
+            encoding="utf-8",
+        )
+
+    def _compute_camera_defs_for_diagram(self, camera_rig: dict[str, Any]) -> list[dict[str, Any]]:
+        main = camera_rig["main_camera"]
+        secondary = camera_rig["secondary_camera"]
+        main_pos = [float(v) for v in main["position"]]
+        offset = [float(v) for v in secondary["position_offset"]]
+        secondary_pos = [main_pos[0] + offset[0], main_pos[1] + offset[1], main_pos[2] + offset[2]]
+        main_rot = [float(v) for v in main["rotation_deg"]]
+        secondary_rot_offset = [float(v) for v in secondary["rotation_offset_deg"]]
+        secondary_rot = [main_rot[i] + secondary_rot_offset[i] for i in range(3)]
+        return [
+            {
+                "name": "camera_main",
+                "position": main_pos,
+                "rotation_deg": main_rot,
+                "marker_color": main.get("marker_color", [0.05, 0.25, 0.95]),
+                "parallel_look_at": self._parallel_look_at(main_pos, main_rot),
+            },
+            {
+                "name": "camera_secondary",
+                "position": secondary_pos,
+                "rotation_deg": secondary_rot,
+                "marker_color": secondary.get("marker_color", [0.95, 0.45, 0.05]),
+                "parallel_look_at": self._parallel_look_at(secondary_pos, secondary_rot),
+            },
+        ]
+
+    @staticmethod
+    def _parallel_look_at(position: list[float], pitch_yaw_roll_deg: list[float], distance_m: float = 20.0) -> list[float]:
+        pitch = math.radians(float(pitch_yaw_roll_deg[0]))
+        yaw = math.radians(float(pitch_yaw_roll_deg[1]))
+        return [
+            float(position[0]) + distance_m * math.cos(pitch) * math.cos(yaw),
+            float(position[1]) + distance_m * math.cos(pitch) * math.sin(yaw),
+            float(position[2]) + distance_m * math.sin(pitch),
+        ]
+
+    def _build_camera_layout_svg(self, profile: dict[str, Any], camera_rig: dict[str, Any], camera_defs: list[dict[str, Any]]) -> str:
+        anchor = [float(v) for v in profile.get("anchor_position", [0.0, 0.0, 0.0])]
+        look_at = [float(v) for v in camera_rig.get("look_at", [0.0, 0.0, 1.5])]
+        tether = float(profile.get("tether_length_m", 0.0))
+        hfov = float(camera_rig.get("horizontal_fov_deg", 33.332))
+        mode = str(camera_rig.get("orientation_mode", "parallel_manual"))
+        pts = [(anchor[0], anchor[1]), (look_at[0], look_at[1])]
+        for cam in camera_defs:
+            pts.append((float(cam["position"][0]), float(cam["position"][1])))
+        if tether > 0:
+            pts.extend([(anchor[0] - tether, anchor[1] - tether), (anchor[0] + tether, anchor[1] + tether)])
+        min_x = min(x for x, _ in pts) - 2.0
+        max_x = max(x for x, _ in pts) + 2.0
+        min_y = min(y for _, y in pts) - 2.0
+        max_y = max(y for _, y in pts) + 2.0
+        width, height, pad = 1100, 720, 70
+        def sx(x: float) -> float:
+            return pad + (x - min_x) / max(max_x - min_x, 1e-6) * (width - 2 * pad)
+        def sy(y: float) -> float:
+            return height - (pad + (y - min_y) / max(max_y - min_y, 1e-6) * (height - 2 * pad))
+        def color(values: Any) -> str:
+            if isinstance(values, list) and len(values) == 3:
+                return "#%02x%02x%02x" % tuple(max(0, min(255, int(round(float(v) * 255)))) for v in values)
+            return "#1f77b4"
+        svg = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">']
+        svg.append('<rect width="100%" height="100%" fill="white"/>')
+        svg.append('<text x="30" y="35" font-size="22" font-family="Arial" fill="black">Stereo camera top-down layout</text>')
+        svg.append('<text x="30" y="62" font-size="13" font-family="Arial" fill="#555">Generated by GUI at RUN. Units: meters in world XY.</text>')
+        if tether > 0:
+            rx = abs(sx(anchor[0] + tether) - sx(anchor[0]))
+            ry = abs(sy(anchor[1] + tether) - sy(anchor[1]))
+            svg.append(f'<ellipse cx="{sx(anchor[0]):.1f}" cy="{sy(anchor[1]):.1f}" rx="{rx:.1f}" ry="{ry:.1f}" fill="none" stroke="#777" stroke-dasharray="6,6" stroke-width="2"/>')
+        svg.append(f'<circle cx="{sx(anchor[0]):.1f}" cy="{sy(anchor[1]):.1f}" r="7" fill="#222"/>')
+        svg.append(f'<text x="{sx(anchor[0])+10:.1f}" y="{sy(anchor[1])-10:.1f}" font-size="14" font-family="Arial">Anchor</text>')
+        svg.append(f'<circle cx="{sx(look_at[0]):.1f}" cy="{sy(look_at[1]):.1f}" r="6" fill="#d62728"/>')
+        svg.append(f'<text x="{sx(look_at[0])+10:.1f}" y="{sy(look_at[1])+5:.1f}" font-size="14" font-family="Arial">Look-at</text>')
+        for cam in camera_defs:
+            pos = [float(v) for v in cam["position"]]
+            target = look_at if mode == "look_at_target" else [float(v) for v in cam["parallel_look_at"]]
+            dx, dy = target[0] - pos[0], target[1] - pos[1]
+            norm = math.sqrt(dx * dx + dy * dy) or 1.0
+            ux, uy = dx / norm, dy / norm
+            depth = min(max(norm * 0.45, 2.0), 10.0)
+            spread = math.tan(math.radians(hfov) / 2.0) * depth
+            cx, cy = pos[0] + ux * depth, pos[1] + uy * depth
+            rx, ry = -uy, ux
+            p1 = (pos[0], pos[1])
+            p2 = (cx + rx * spread, cy + ry * spread)
+            p3 = (cx - rx * spread, cy - ry * spread)
+            c = color(cam.get("marker_color"))
+            x0, y0 = sx(pos[0]), sy(pos[1])
+            svg.append(f'<polygon points="{sx(p1[0]):.1f},{sy(p1[1]):.1f} {sx(p2[0]):.1f},{sy(p2[1]):.1f} {sx(p3[0]):.1f},{sy(p3[1]):.1f}" fill="{c}" fill-opacity="0.14" stroke="{c}" stroke-width="2"/>')
+            svg.append(f'<rect x="{x0-8:.1f}" y="{y0-8:.1f}" width="16" height="16" transform="rotate(45 {x0:.1f} {y0:.1f})" fill="{c}" stroke="#111" stroke-width="1"/>')
+            svg.append(f'<text x="{x0+12:.1f}" y="{y0-10:.1f}" font-size="14" font-family="Arial">{cam["name"]}</text>')
+        svg.append('</svg>')
+        return "\n".join(svg)
+
     def _on_load(self) -> None:
         selected_path = filedialog.askopenfilename(
             title="Load tethered glider JSON profile",
@@ -1302,6 +1706,8 @@ class SceneProfileGui:
 
             self.current_profile_path = profile_path
             self._load_profile_into_gui(profile)
+            self._write_gui_state(profile_path, profile)
+            self._refresh_scene_profile_list()
 
         except Exception as exc:
             messagebox.showerror("Load failed", str(exc))
@@ -1311,6 +1717,8 @@ class SceneProfileGui:
             profile = self._collect_profile_from_gui()
             profile_path = default_profile_path(self.project_root, profile["scene_name"])
             save_json_profile(profile_path, profile)
+            self._write_gui_state(profile_path, profile)
+            self._refresh_scene_profile_list()
 
             self.current_profile_path = profile_path
             self.status_text.set(f"Saved: {profile_path}")
@@ -1322,8 +1730,15 @@ class SceneProfileGui:
     def _on_run(self) -> None:
         try:
             profile = self._collect_profile_from_gui()
+
+            if not self._prompt_delete_output_folder_before_run():
+                return
+
             profile_path = default_profile_path(self.project_root, profile["scene_name"])
             save_json_profile(profile_path, profile)
+            self._write_gui_state(profile_path, profile)
+            self._refresh_scene_profile_list()
+            self._write_camera_layout_files_before_run(profile)
 
             self.result = {
                 "run_requested": True,
