@@ -1,191 +1,142 @@
-# v18 dashboard camera-order and frustum-diagnostic fixes
+# kite_isaac_camera_anchor_metrics_v21
 
-Patch name: `kite_isaac_dashboard_frustum_layout_v18.zip`
+This patch extends the **camera plan-view diagnostics** so each camera wedge reports:
 
-This patch builds on v17. It fixes the dashboard camera-column order issue and clarifies the camera-frustum workflow.
+- the **triangle height** of the plotted horizontal-FOV wedge,
+- the camera-to-anchor **Euclidean distance**,
+- the camera-to-anchor **XY distance**,
+- the signed **Δx** and **Δy** from camera to anchor,
+- and the signed **Δz** from camera to anchor.
 
-## Replace these files
+This directly addresses the request to make the plan-view SVG more informative for stereo-geometry interpretation.
 
-Copy these files into the project root, preserving folders:
+---
 
-```text
-scenario/tethered_glider_scene.py
-dashboard_streamlit.py
-README_PATCH.md
-```
+## What changed
 
-No environment assets are changed. Keep your environment at:
+### 1) `scenario/tethered_glider_scene.py`
 
-```text
-assets/environments/flatland_trees_cloudy_01/
-    metadata.json
-    scene.usda
-    hdri/autumn_field_8k.hdr
-    source/grass_with_dirt_patches_material.glb
-    textures/
-```
+The camera-rig diagnostics now compute and expose additional per-camera quantities.
 
-## Fixed / changed behavior
+#### Added numeric camera-to-anchor diagnostics
+For each camera, the generated JSON / CSV diagnostics now include:
 
-### 1. Dashboard: swap camera columns
+- `anchor_relative.dx_anchor_minus_camera_m`
+- `anchor_relative.dy_anchor_minus_camera_m`
+- `anchor_relative.dz_anchor_minus_camera_m`
+- `anchor_relative.distance_xy_m`
+- `anchor_relative.distance_euclidean_m`
 
-The dashboard now has a camera-display control:
+These are also appended to `camera_rig_layout_summary.csv` as rows such as:
 
-```text
-Swap camera columns
-```
+- `camera_main_anchor_dx`
+- `camera_main_anchor_dy`
+- `camera_main_anchor_distance_xy`
+- `camera_main_anchor_distance_euclidean`
+- same for `camera_secondary`
 
-This only changes the dashboard display order:
+#### Added plan-view triangle height
+Inside the pure-XY plan-view builder, each camera wedge now computes:
 
-```text
-camera_main | camera_secondary
-```
+- `base_midpoint`
+- `triangle_height_m`
 
-or:
+where `triangle_height_m` is the perpendicular distance from the camera apex to the base segment of the horizontal-FOV triangle shown in the plot.
 
-```text
-camera_secondary | camera_main
-```
+In other words, if the plotted triangle is:
 
-It does not rename folders, does not change `capture_manifest.csv`, does not change `frame_state.csv`, and does not change the profile.
+- apex = camera origin in XY,
+- base endpoints = the left/right clipped ray endpoints,
 
-Use this when the physical right camera is currently stored as `camera_main`, or when you simply want the dashboard display to match your visual interpretation.
+then the triangle height is the length from the apex to the midpoint of the base.
 
-### 2. Dashboard: new Camera layout tab
+#### SVG overlays added
+In `camera_rig_layout.svg` / `camera_rig_layout_plan_roi.svg` / `camera_rig_layout_plan_full.svg`, each camera now shows:
 
-The dashboard now includes a tab:
+- a dashed **triangle-height line** from apex to base midpoint,
+- an **`h_tri=... m`** label next to that line,
+- camera annotation text including:
+  - `h_tri`
+  - `d_E` (Euclidean distance to anchor)
+  - `Δx(A-C)`
+  - `Δy(A-C)`
 
-```text
-Camera layout
-```
+The numeric side panel now also includes, for each camera:
 
-It displays:
+- plotted triangle height,
+- Euclidean distance to anchor,
+- XY distance to anchor,
+- signed `Δx`, `Δy`, and `Δz`.
 
-```text
-outputs/<scene>/camera_rig_layout.svg
-outputs/<scene>/camera_rig_layout.json
-```
+---
 
-This is the correct diagnostic for stereo geometry, camera placement, horizontal FOV, and approximate view overlap.
+## Interpretation notes
 
-### 3. Camera layout SVG now uses the configured frustum distance
+### Distance sign convention
+The deltas use:
 
-Before v18, the SVG drew a compact schematic wedge. That was useful but not faithful to the `frustum_distance_m` setting.
+- `Δx = anchor_x - camera_x`
+- `Δy = anchor_y - camera_y`
+- `Δz = anchor_z - camera_z`
 
-v18 changes the generated SVG so that the top-down wedges use:
+So these are **signed offsets from the camera to the anchor** in world coordinates.
 
-```json
-"camera_rig": {
-  "horizontal_fov_deg": ...,
-  "frustum_distance_m": ...
-}
-```
+### Triangle height meaning
+The reported `h_tri` is the height of the **drawn plan-view triangle**, not a 3D frustum depth quantity.
 
-The diagram draws transparent wedges. Their overlap appears by transparency blending.
+Because the ROI plan view may clip the ray length for readability, `h_tri` corresponds to the actual triangle drawn in that figure.
 
-This makes the diagram more useful when you set, for example:
+That is exactly what you asked for: a value associated with each displayed triangle.
 
-```text
-frustum_distance_m = 50
-frustum_distance_m = 100
-frustum_distance_m = 200
-```
+---
 
-### 4. Important: do not judge overlap from the camera RGB image
+## Files changed
 
-The in-scene frustum overlay under:
+Replace:
 
-```text
-/World/CameraFrustums
-```
+- `scenario/tethered_glider_scene.py`
 
-is renderable debug geometry.
+No dashboard logic change was required for this patch because the dashboard already renders the SVGs produced by the scene generator.
 
-If you look through the same camera that owns the frustum, the far-plane rectangle is projected near the image boundary. At large distances it may be clipped, partially hidden, too thin to see clearly, or outside the visible raster due to exact projection/antialiasing. It is not a good stereo-overlap diagnostic.
+---
 
-Use the `camera_rig_layout.svg` / dashboard Camera layout tab for geometric interpretation. Use in-scene frustums only from the Isaac perspective viewport while tuning camera pose.
+## Expected outputs after running again
 
-### 5. Do not enable frustums for clean dataset capture
+After a new run, you should see updated values in:
 
-Frustum lines are visible renderable geometry. If enabled, they can appear in:
+- `camera_rig_layout.svg`
+- `camera_rig_layout_plan_roi.svg`
+- `camera_rig_layout_plan_full.svg`
+- `camera_rig_layout.json`
+- `camera_rig_layout_summary.csv`
 
-```text
-camera_main/rgb_*.png
-camera_secondary/rgb_*.png
-```
+---
 
-Keep this unchecked for final datasets:
+## Quick verification checklist
 
-```text
-Show camera frustum rectangles/rays in Isaac viewport = false
-```
+After running a scene:
 
-Enable it only for short tuning/debugging runs.
+1. Open the **Camera layout** tab in the dashboard.
+2. In the plan view, confirm that each camera wedge has:
+   - a dashed internal height line,
+   - an `h_tri=... m` label.
+3. Check the right-side numeric panel and confirm each camera lists:
+   - `d_E`
+   - `d_XY`
+   - `Δx`
+   - `Δy`
+   - `Δz`
+4. Open `camera_rig_layout_summary.csv` and confirm the new rows were written.
 
-## Test procedure
+---
 
-1. Replace the files.
+## Important note
 
-2. Run the GUI/Isaac producer normally:
+This patch improves diagnostics only. It does **not** change:
 
-```powershell
-cd C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac
-C:\Users\Admin\anaconda3\envs\env_isaaclab\python.exe main.py
-```
-
-3. Use a short run first:
-
-```text
-num_frames = 60
-```
-
-4. For clean RGB capture, keep:
-
-```text
-Show camera frustum rectangles/rays = false
-```
-
-5. For geometry tuning only, enable frustums and set:
-
-```text
-Frustum distance [m] = 20, 50, 100, or 200
-```
-
-6. After the run, check:
-
-```text
-outputs/<scene>/camera_rig_layout.svg
-outputs/<scene>/camera_rig_layout.json
-outputs/<scene>/camera_main/last_frame.png
-outputs/<scene>/camera_secondary/last_frame.png
-```
-
-7. Run the dashboard:
-
-```powershell
-cd C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac
-C:\Users\Admin\anaconda3\envs\main\python.exe -m streamlit run dashboard_streamlit.py
-```
-
-8. In the dashboard:
-
-```text
-- select the scene output folder
-- use Swap camera columns if needed
-- open Camera layout tab
-- inspect approximate stereo overlap in camera_rig_layout.svg
-```
-
-## Expected result
-
-```text
-- dashboard camera columns can be swapped without changing data
-- camera_rig_layout.svg shows full configured frustum wedges in top-down XY
-- dashboard has a Camera layout tab
-- RGB images remain clean when frustum overlays are disabled
-```
-
-## Files not changed
-
-The GUI scene manager, profile normalization, asset loader, and environment loader files from v17 are unchanged by v18.
+- capture geometry,
+- camera placement,
+- render settings,
+- glider dynamics,
+- or dashboard scene-selection behavior.
 

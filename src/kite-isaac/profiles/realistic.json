@@ -2,7 +2,7 @@
   "scene_name": "realistic",
   "anchor_position": [
     0.0,
-    0.0,
+    -0.5,
     1.0
   ],
   "tether_length_m": 6.0,
@@ -64,7 +64,7 @@
   "camera_rig": {
     "enabled": true,
     "show_markers": true,
-    "show_frustums": true,
+    "show_frustums": false,
     "frustum_distance_m": 40.0,
     "frustum_line_width_m": 0.1,
     "orientation_mode": "parallel_manual",
@@ -82,13 +82,13 @@
       ],
       "position": [
         -2.5,
-        16.0,
-        1.0
+        15.9,
+        0.9
       ],
       "rotation_deg": [
-        2.2,
+        22.2,
         -90.0,
-        -0.2
+        -0.1
       ]
     },
     "secondary_camera": {
@@ -104,18 +104,18 @@
         0.5019607843137255
       ],
       "position_offset": [
-        7.8,
+        6.0,
         -0.1,
         -0.1
       ],
       "rotation_offset_deg": [
         -0.3,
-        -0.1,
+        0.0,
         -0.8
       ]
     },
     "look_at": [
-      -0.1,
+      0.0,
       -0.1,
       1.5
     ],

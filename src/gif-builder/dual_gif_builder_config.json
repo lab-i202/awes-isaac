@@ -1,15 +1,15 @@
 {
-  "input_folder_1": "C:/Users/Admin/Documents/Github/awes-isaac/src/kite-isaac/outputs/tethered_glider_basic/camera_main",
-  "output_gif_1": "C:/Users/Admin/Documents/Github/awes-isaac/src/gif-builder/outputs/output_0.gif",
-  "input_folder_2": "C:/Users/Admin/Documents/Github/awes-isaac/src/kite-isaac/outputs/tethered_glider_basic/camera_secondary",
-  "output_gif_2": "C:/Users/Admin/Documents/Github/awes-isaac/src/gif-builder/outputs/output_1.gif",
+  "input_folder_1": "C:/Users/Admin/Documents/Github/awes-isaac/src/kite-isaac/outputs/realistic/camera_main",
+  "output_gif_1": "C:/Users/Admin/Documents/Github/awes-isaac/src/gif-builder/outputs/output_r0.gif",
+  "input_folder_2": "C:/Users/Admin/Documents/Github/awes-isaac/src/kite-isaac/outputs/realistic/camera_secondary",
+  "output_gif_2": "C:/Users/Admin/Documents/Github/awes-isaac/src/gif-builder/outputs/output_r1.gif",
   "duration_ms": "20",
   "loop_count": "0",
-  "frame_stride": "4",
+  "frame_stride": "2",
   "recursive": false,
   "resize_to_first_frame": true,
   "natural_sort": true,
-  "quality_percent": "30",
+  "quality_percent": "25",
   "background_color": "#FFFFFF",
   "extensions": ".png,.jpg,.jpeg,.bmp,.webp,.tif,.tiff,.gif"
 }

@@ -551,7 +551,12 @@ manifest_path = dataset_dir / "capture_manifest.csv"
 metadata_path = dataset_dir / "camera_rig_metadata.json"
 validation_path = dataset_dir / "validation_report.json"
 layout_svg_path = dataset_dir / "camera_rig_layout.svg"
+layout_plan_roi_svg_path = dataset_dir / "camera_rig_layout_plan_roi.svg"
+layout_plan_full_svg_path = dataset_dir / "camera_rig_layout_plan_full.svg"
+layout_elevation_svg_path = dataset_dir / "camera_rig_layout_elevation.svg"
+layout_nearfield_svg_path = dataset_dir / "camera_rig_layout_nearfield.svg"
 layout_json_path = dataset_dir / "camera_rig_layout.json"
+layout_summary_path = dataset_dir / "camera_rig_layout_summary.csv"
 
 frame_state = coerce_numeric_columns(read_csv_if_exists(frame_state_path))
 manifest = read_csv_if_exists(manifest_path)
@@ -643,19 +648,59 @@ with tab_live:
 with tab_layout:
     st.subheader("Camera rig layout")
     st.caption(
-        "This is the correct place to inspect stereo geometry and approximate view overlap. "
-        "In-scene frustum lines are renderable debug geometry and can contaminate RGB images."
+        "These diagnostics are split deliberately. The plan view is pure world XY and uses only horizontal FOV. "
+        "The elevation view is depth-versus-Z and uses only vertical FOV. This avoids mixing a 2D top-down plot "
+        "with the projected 3D camera pyramid."
     )
 
-    if layout_svg_path.exists():
-        try:
-            svg_text = layout_svg_path.read_text(encoding="utf-8")
-            components.html(svg_text, height=760, scrolling=True)
-            st.caption(f"SVG: `{layout_svg_path}`")
-        except Exception as exc:
-            st.error(f"Could not display `{layout_svg_path}`: {exc}")
-    else:
-        st.warning(f"No camera_rig_layout.svg found at `{layout_svg_path}`. Run a capture first.")
+    def show_svg_file(title: str, path: Path, height: int, note: str = "") -> None:
+        st.markdown(f"#### {title}")
+        if note:
+            st.caption(note)
+        if path.exists():
+            try:
+                svg_text = path.read_text(encoding="utf-8")
+                components.html(svg_text, height=height, scrolling=True)
+                st.caption(f"SVG: `{path}`")
+            except Exception as exc:
+                st.error(f"Could not display `{path}`: {exc}")
+        else:
+            st.warning(f"No SVG found at `{path}`. Run a new capture after installing the latest patch.")
+
+    # Prefer the new v20 file names. Fall back to v19 names for old datasets.
+    plan_roi_to_show = layout_plan_roi_svg_path if layout_plan_roi_svg_path.exists() else layout_nearfield_svg_path
+    plan_full_to_show = layout_plan_full_svg_path if layout_plan_full_svg_path.exists() else layout_svg_path
+
+    show_svg_file(
+        "Plan view — pure XY horizontal FOV",
+        plan_roi_to_show,
+        980,
+        "Use this view for camera XY placement, baseline interpretation, orbit coverage, and stereo horizontal overlap. "
+        "If the configured frustum distance is very large, rays are clipped for readability and labelled inside the SVG.",
+    )
+
+    show_svg_file(
+        "Elevation view — depth versus world Z",
+        layout_elevation_svg_path,
+        900,
+        "Use this view for camera height, pitch, glider height, and vertical FOV checks. It intentionally does not show horizontal overlap.",
+    )
+
+    with st.expander("Full configured-distance plan view", expanded=False):
+        show_svg_file(
+            "Full plan view",
+            plan_full_to_show,
+            980,
+            "This uses the configured frustum distance. It can look visually compressed when frustum_distance_m is hundreds of meters.",
+        )
+
+    if layout_summary_path.exists():
+        st.subheader("Layout numeric summary")
+        layout_summary = coerce_numeric_columns(read_csv_if_exists(layout_summary_path))
+        if not layout_summary.empty:
+            st.dataframe(layout_summary, use_container_width=True, hide_index=True)
+        else:
+            st.info(f"No readable rows found in `{layout_summary_path}`")
 
     with st.expander("camera_rig_layout.json", expanded=False):
         layout_json = read_json_if_exists(layout_json_path)
@@ -800,7 +845,7 @@ with tab_files:
     st.subheader("Dataset files")
 
     file_rows = []
-    for path in [frame_state_path, manifest_path, metadata_path, layout_svg_path, layout_json_path, validation_path]:
+    for path in [frame_state_path, manifest_path, metadata_path, layout_svg_path, layout_nearfield_svg_path, layout_json_path, layout_summary_path, validation_path]:
         file_rows.append(
             {
                 "file": path.name,
