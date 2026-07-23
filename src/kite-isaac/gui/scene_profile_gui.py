@@ -13,14 +13,17 @@ from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, ttk
 from typing import Any
 
-from utils.asset_io import collect_registry_status, load_asset_registry
+from utils.asset_io import collect_registry_status, discover_environment_assets, load_asset_registry
 
 from utils.profile_io import (
     CAMERA_ORIENTATION_MODES,
     DEFAULT_CAMERA_RIG,
     DEFAULT_CAPTURE,
     DEFAULT_GLIDER_ASSET,
+    DEFAULT_ENVIRONMENT,
+    ENVIRONMENT_MODES,
     GLIDER_ASSET_MODES,
+    normalize_environment,
     compute_parallel_rig_pitch_yaw_roll_deg,
     default_profile_path,
     load_json_profile,
@@ -92,6 +95,7 @@ class SceneProfileGui:
         self.current_profile_path = initial_profile_path
         self.result: dict[str, Any] | None = None
         self.available_glider_asset_ids = self._load_available_glider_asset_ids()
+        self.available_environment_asset_ids = self._load_available_environment_asset_ids()
 
         self.root = tk.Tk()
         self.root.title("Tethered Glider Scene Profile")
@@ -132,6 +136,16 @@ class SceneProfileGui:
 
         return sorted(converted_ids) + sorted(other_ids)
 
+    def _load_available_environment_asset_ids(self) -> list[str]:
+        try:
+            entries = discover_environment_assets(self.project_root)
+        except Exception:
+            return []
+
+        usable_ids = [str(item["asset_id"]) for item in entries if bool(item.get("scene_exists", False))]
+        unusable_ids = [str(item["asset_id"]) for item in entries if not bool(item.get("scene_exists", False))]
+        return sorted(usable_ids) + sorted(unusable_ids)
+
     def _build_variables(self) -> None:
         self.scene_name = tk.StringVar()
 
@@ -145,6 +159,18 @@ class SceneProfileGui:
 
         self.num_frames = tk.IntVar()
         self.time_step_s = tk.DoubleVar()
+
+        self.environment_mode = tk.StringVar()
+        self.environment_asset_id = tk.StringVar()
+        self.environment_translation_x = tk.DoubleVar()
+        self.environment_translation_y = tk.DoubleVar()
+        self.environment_translation_z = tk.DoubleVar()
+        self.environment_rotation_x_deg = tk.DoubleVar()
+        self.environment_rotation_y_deg = tk.DoubleVar()
+        self.environment_rotation_z_deg = tk.DoubleVar()
+        self.environment_uniform_scale = tk.DoubleVar()
+        self.environment_project_lights_enabled = tk.BooleanVar()
+        self.environment_fallback_to_plain_debug = tk.BooleanVar()
 
         self.wingspan_m = tk.DoubleVar()
         self.length_m = tk.DoubleVar()
@@ -257,16 +283,19 @@ class SceneProfileGui:
         notebook.pack(side="top", fill="both", expand=True)
 
         scene_scroll = ScrollableFrame(notebook)
+        environment_scroll = ScrollableFrame(notebook)
         glider_scroll = ScrollableFrame(notebook)
         camera_scroll = ScrollableFrame(notebook)
         capture_scroll = ScrollableFrame(notebook)
 
         notebook.add(scene_scroll, text="Scene")
+        notebook.add(environment_scroll, text="Environment")
         notebook.add(glider_scroll, text="Glider")
         notebook.add(camera_scroll, text="Cameras")
         notebook.add(capture_scroll, text="Capture")
 
         self._build_scene_tab(scene_scroll.content)
+        self._build_environment_tab(environment_scroll.content)
         self._build_glider_tab(glider_scroll.content)
         self._build_camera_tab(camera_scroll.content)
         self._build_capture_tab(capture_scroll.content)
@@ -311,6 +340,110 @@ class SceneProfileGui:
         self._add_int_row(parent, row, "Number of frames", self.num_frames)
         row += 1
         self._add_float_row(parent, row, "Time step [s]", self.time_step_s)
+
+        parent.columnconfigure(1, weight=1)
+
+    def _build_environment_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=12)
+        row = 0
+
+        ttk.Label(parent, text="Environment selection", font=("Segoe UI", 10, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 4)
+        )
+        row += 1
+
+        ttk.Label(parent, text="Environment mode").grid(row=row, column=0, sticky="w")
+        mode_box = ttk.Combobox(
+            parent,
+            textvariable=self.environment_mode,
+            values=ENVIRONMENT_MODES,
+            state="readonly",
+            width=24,
+        )
+        mode_box.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        mode_box.bind("<<ComboboxSelected>>", self._on_environment_mode_changed)
+        row += 1
+
+        ttk.Label(parent, text="External environment ID").grid(row=row, column=0, sticky="w")
+        environment_selector = ttk.Frame(parent)
+        environment_selector.grid(row=row, column=1, sticky="ew", padx=8, pady=4)
+        environment_selector.columnconfigure(0, weight=1)
+
+        self.environment_asset_combo = ttk.Combobox(
+            environment_selector,
+            textvariable=self.environment_asset_id,
+            values=self.available_environment_asset_ids,
+            state="readonly" if self.available_environment_asset_ids else "normal",
+            width=34,
+        )
+        self.environment_asset_combo.grid(row=0, column=0, sticky="ew")
+
+        ttk.Button(
+            environment_selector,
+            text="Refresh",
+            command=self._on_refresh_environment_asset_list,
+        ).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "plain_debug keeps the previous simple generated world. external_usd loads "
+                "assets/environments/<id>/scene.usda or the scene_path from metadata.json under /World/Environment."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 10))
+        row += 1
+
+        ttk.Separator(parent).grid(row=row, column=0, columnspan=2, sticky="ew", pady=10)
+        row += 1
+
+        ttk.Label(parent, text="Environment transform", font=("Segoe UI", 10, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(0, 4)
+        )
+        row += 1
+
+        self._add_float_row(parent, row, "Translation X [m]", self.environment_translation_x)
+        row += 1
+        self._add_float_row(parent, row, "Translation Y [m]", self.environment_translation_y)
+        row += 1
+        self._add_float_row(parent, row, "Translation Z [m]", self.environment_translation_z)
+        row += 1
+
+        self._add_float_row(parent, row, "Rotation X [deg]", self.environment_rotation_x_deg)
+        row += 1
+        self._add_float_row(parent, row, "Rotation Y [deg]", self.environment_rotation_y_deg)
+        row += 1
+        self._add_float_row(parent, row, "Rotation Z [deg]", self.environment_rotation_z_deg)
+        row += 1
+
+        self._add_float_row(parent, row, "Uniform scale", self.environment_uniform_scale)
+        row += 1
+
+        ttk.Checkbutton(
+            parent,
+            text="Use project default lights",
+            variable=self.environment_project_lights_enabled,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(8, 4))
+        row += 1
+
+        ttk.Checkbutton(
+            parent,
+            text="Fallback to plain_debug if external environment fails",
+            variable=self.environment_fallback_to_plain_debug,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "Use the transform to move the whole imported scene relative to the glider anchor/camera rig. "
+                "For external scenes that already contain HDRI/dome/sun lights, keep project default lights off."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         parent.columnconfigure(1, weight=1)
 
@@ -656,6 +789,7 @@ class SceneProfileGui:
 
     def _on_refresh_glider_asset_list(self) -> None:
         self.available_glider_asset_ids = self._load_available_glider_asset_ids()
+        self.available_environment_asset_ids = self._load_available_environment_asset_ids()
 
         if hasattr(self, "glider_asset_combo"):
             self.glider_asset_combo.configure(
@@ -670,6 +804,35 @@ class SceneProfileGui:
         self.status_text.set(
             "Loaded glider asset IDs: "
             + (", ".join(self.available_glider_asset_ids) if self.available_glider_asset_ids else "none")
+        )
+
+    def _on_environment_mode_changed(self, _event: tk.Event | None = None) -> None:
+        mode = self.environment_mode.get().strip()
+        if mode == "external_usd":
+            self.environment_project_lights_enabled.set(False)
+            if not self.environment_asset_id.get().strip() and self.available_environment_asset_ids:
+                self.environment_asset_id.set(self.available_environment_asset_ids[0])
+            self.status_text.set("External USD environment selected. Project default lights were turned off.")
+        elif mode == "plain_debug":
+            self.environment_project_lights_enabled.set(True)
+            self.status_text.set("plain_debug environment selected. Project default lights were turned on.")
+
+    def _on_refresh_environment_asset_list(self) -> None:
+        self.available_environment_asset_ids = self._load_available_environment_asset_ids()
+
+        if hasattr(self, "environment_asset_combo"):
+            self.environment_asset_combo.configure(
+                values=self.available_environment_asset_ids,
+                state="readonly" if self.available_environment_asset_ids else "normal",
+            )
+
+        current_asset_id = self.environment_asset_id.get().strip()
+        if not current_asset_id and self.available_environment_asset_ids:
+            self.environment_asset_id.set(self.available_environment_asset_ids[0])
+
+        self.status_text.set(
+            "Loaded environment asset IDs: "
+            + (", ".join(self.available_environment_asset_ids) if self.available_environment_asset_ids else "none")
         )
 
     def _on_pick_glider_asset_color(self) -> None:
@@ -733,6 +896,7 @@ class SceneProfileGui:
         camera_rig = normalize_camera_rig(profile.get("camera_rig", DEFAULT_CAMERA_RIG))
         capture = dict(DEFAULT_CAPTURE)
         capture.update(profile.get("capture", {}))
+        environment = normalize_environment(profile.get("environment", DEFAULT_ENVIRONMENT))
         glider_asset = dict(DEFAULT_GLIDER_ASSET)
         glider_asset.update(profile.get("glider_asset", {}))
         material_override = dict(DEFAULT_GLIDER_ASSET["material_override"])
@@ -752,6 +916,20 @@ class SceneProfileGui:
 
         self.num_frames.set(int(profile["num_frames"]))
         self.time_step_s.set(float(profile["time_step_s"]))
+
+        self.environment_mode.set(str(environment.get("mode", DEFAULT_ENVIRONMENT["mode"])))
+        self.environment_asset_id.set(str(environment.get("asset_id", DEFAULT_ENVIRONMENT["asset_id"])))
+        environment_translation = environment.get("translation_m", DEFAULT_ENVIRONMENT["translation_m"])
+        environment_rotation = environment.get("rotation_xyz_deg", DEFAULT_ENVIRONMENT["rotation_xyz_deg"])
+        self.environment_translation_x.set(float(environment_translation[0]))
+        self.environment_translation_y.set(float(environment_translation[1]))
+        self.environment_translation_z.set(float(environment_translation[2]))
+        self.environment_rotation_x_deg.set(float(environment_rotation[0]))
+        self.environment_rotation_y_deg.set(float(environment_rotation[1]))
+        self.environment_rotation_z_deg.set(float(environment_rotation[2]))
+        self.environment_uniform_scale.set(float(environment.get("uniform_scale", DEFAULT_ENVIRONMENT["uniform_scale"])))
+        self.environment_project_lights_enabled.set(bool(environment.get("project_lights_enabled", DEFAULT_ENVIRONMENT["project_lights_enabled"])))
+        self.environment_fallback_to_plain_debug.set(bool(environment.get("fallback_to_plain_debug", DEFAULT_ENVIRONMENT["fallback_to_plain_debug"])))
 
         self.wingspan_m.set(float(glider["wingspan_m"]))
         self.length_m.set(float(glider["length_m"]))
@@ -838,6 +1016,23 @@ class SceneProfileGui:
             "angular_velocity_rad_s": float(self.angular_velocity_rad_s.get()),
             "num_frames": int(self.num_frames.get()),
             "time_step_s": float(self.time_step_s.get()),
+            "environment": {
+                "mode": self.environment_mode.get().strip(),
+                "asset_id": self.environment_asset_id.get().strip(),
+                "translation_m": [
+                    float(self.environment_translation_x.get()),
+                    float(self.environment_translation_y.get()),
+                    float(self.environment_translation_z.get()),
+                ],
+                "rotation_xyz_deg": [
+                    float(self.environment_rotation_x_deg.get()),
+                    float(self.environment_rotation_y_deg.get()),
+                    float(self.environment_rotation_z_deg.get()),
+                ],
+                "uniform_scale": float(self.environment_uniform_scale.get()),
+                "project_lights_enabled": bool(self.environment_project_lights_enabled.get()),
+                "fallback_to_plain_debug": bool(self.environment_fallback_to_plain_debug.get()),
+            },
             "glider": {
                 "wingspan_m": float(self.wingspan_m.get()),
                 "length_m": float(self.length_m.get()),

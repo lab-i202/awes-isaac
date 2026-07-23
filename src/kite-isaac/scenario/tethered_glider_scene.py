@@ -26,9 +26,11 @@ from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdShade
 from utils.asset_io import (
     get_asset_converted_usd_path,
     get_asset_entry,
+    get_environment_asset_entry,
+    get_environment_scene_path,
     load_asset_registry,
 )
-from utils.profile_io import normalize_camera_rig, sanitize_filename
+from utils.profile_io import normalize_camera_rig, normalize_environment, sanitize_filename
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -52,8 +54,16 @@ def run_tethered_glider_scene(
         print(f"[warning] reset_render_settings failed: {exc}")
 
     configure_renderer()
-    create_lights(stage)
-    create_environment(stage)
+
+    environment_cfg = normalize_environment(scene_config.get("environment", {}))
+    scene_config["environment"] = environment_cfg
+
+    if bool(environment_cfg.get("project_lights_enabled", True)):
+        create_lights(stage)
+    else:
+        print("Project default lights disabled by environment.project_lights_enabled=false.")
+
+    create_environment(stage, scene_config)
     create_anchor(stage, scene_config)
     create_tether_curve(stage)
     create_glider_visual(stage, scene_config)
@@ -99,6 +109,11 @@ def run_tethered_glider_scene(
     print(f"Time step: {time_step_s} s")
     print(f"Camera rig enabled: {camera_enabled}")
     print(f"Capture enabled: {capture_enabled}")
+    print(f"Environment mode: {environment_cfg.get('mode', 'plain_debug')}")
+    print(f"Environment asset id: {environment_cfg.get('asset_id', '')}")
+    print(f"Environment translation m: {environment_cfg.get('translation_m', [0.0, 0.0, 0.0])}")
+    print(f"Environment rotation XYZ deg: {environment_cfg.get('rotation_xyz_deg', [0.0, 0.0, 0.0])}")
+    print(f"Environment uniform scale: {environment_cfg.get('uniform_scale', 1.0)}")
 
     if camera_enabled:
         print(f"Camera orientation mode: {camera_rig_cfg['orientation_mode']}")
@@ -399,6 +414,7 @@ def write_capture_metadata(
         "time_step_s": float(scene_config["time_step_s"]),
         "camera_rig": camera_rig_cfg,
         "camera_definitions": camera_defs,
+        "environment": scene_config.get("environment", {}),
         "notes": [
             "camera_main uses the blue marker and outputs to camera_main/.",
             "camera_secondary uses the orange marker and outputs to camera_secondary/.",
@@ -501,6 +517,19 @@ def compute_glider_state_row(
     glider_visual_mode = str(glider_asset_cfg.get("mode", "proxy"))
     glider_asset_id = str(glider_asset_cfg.get("asset_id", ""))
 
+    environment_cfg = normalize_environment(scene_config.get("environment", {}))
+    environment_mode = str(environment_cfg.get("mode", "plain_debug"))
+    environment_asset_id = str(environment_cfg.get("asset_id", ""))
+    environment_translation = [float(value) for value in environment_cfg.get("translation_m", [0.0, 0.0, 0.0])]
+    environment_rotation = [float(value) for value in environment_cfg.get("rotation_xyz_deg", [0.0, 0.0, 0.0])]
+    environment_uniform_scale = float(environment_cfg.get("uniform_scale", 1.0))
+    environment_scene_path = ""
+    if environment_mode == "external_usd" and environment_asset_id:
+        try:
+            environment_scene_path = str(get_environment_scene_path(PROJECT_ROOT, environment_asset_id))
+        except Exception:
+            environment_scene_path = "UNRESOLVED"
+
     main_record = manifest_map.get("camera_main", {}).get(frame_index, {})
     secondary_record = manifest_map.get("camera_secondary", {}).get(frame_index, {})
 
@@ -545,6 +574,16 @@ def compute_glider_state_row(
         "glider_visual_mode": glider_visual_mode,
         "glider_asset_id": glider_asset_id,
         "motion_model": "kinematic_circle",
+        "environment_mode": environment_mode,
+        "environment_asset_id": environment_asset_id,
+        "environment_scene_path": environment_scene_path,
+        "environment_translation_x_m": f"{environment_translation[0]:.9f}",
+        "environment_translation_y_m": f"{environment_translation[1]:.9f}",
+        "environment_translation_z_m": f"{environment_translation[2]:.9f}",
+        "environment_rotation_x_deg": f"{environment_rotation[0]:.9f}",
+        "environment_rotation_y_deg": f"{environment_rotation[1]:.9f}",
+        "environment_rotation_z_deg": f"{environment_rotation[2]:.9f}",
+        "environment_uniform_scale": f"{environment_uniform_scale:.9f}",
     }
 
 
@@ -1172,7 +1211,153 @@ def create_lights(stage: Usd.Stage) -> None:
     set_xform(stage, "/World/Lights/Sun", rotation_deg=(-45.0, 0.0, 35.0))
 
 
-def create_environment(stage: Usd.Stage) -> None:
+def create_environment(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
+    environment_cfg = normalize_environment(scene_config.get("environment", {}))
+    mode = str(environment_cfg.get("mode", "plain_debug"))
+
+    if mode == "plain_debug":
+        print("Environment mode: plain_debug")
+        create_plain_debug_environment(stage)
+        return
+
+    if mode == "external_usd":
+        try:
+            create_external_usd_environment(stage, environment_cfg)
+            return
+        except Exception as exc:
+            if bool(environment_cfg.get("fallback_to_plain_debug", True)):
+                print(
+                    "[warning] external USD environment load failed. "
+                    "Falling back to plain_debug environment. "
+                    f"Reason: {exc}"
+                )
+                create_plain_debug_environment(stage)
+                return
+
+            raise
+
+    raise ValueError(f"Unsupported environment.mode: {mode}")
+
+
+def create_external_usd_environment(stage: Usd.Stage, environment_cfg: dict[str, Any]) -> None:
+    environment_id = str(environment_cfg.get("asset_id", "")).strip()
+    if not environment_id:
+        raise ValueError("environment.asset_id cannot be empty in external_usd mode.")
+
+    environment_entry = get_environment_asset_entry(PROJECT_ROOT, environment_id)
+    environment_scene_path = get_environment_scene_path(PROJECT_ROOT, environment_id)
+
+    if not environment_scene_path.exists() or not environment_scene_path.is_file():
+        raise FileNotFoundError(f"Environment scene file does not exist: {environment_scene_path}")
+
+    environment_root_path = "/World/Environment"
+    UsdGeom.Xform.Define(stage, environment_root_path)
+
+    translation_m = tuple(float(value) for value in environment_cfg.get("translation_m", [0.0, 0.0, 0.0]))
+    rotation_xyz_deg = tuple(float(value) for value in environment_cfg.get("rotation_xyz_deg", [0.0, 0.0, 0.0]))
+    uniform_scale = float(environment_cfg.get("uniform_scale", 1.0))
+    if uniform_scale <= 0.0:
+        raise ValueError("environment.uniform_scale must be greater than zero.")
+
+    set_xform(
+        stage=stage,
+        prim_path=environment_root_path,
+        translation=translation_m,
+        rotation_deg=rotation_xyz_deg,
+        scale=(uniform_scale, uniform_scale, uniform_scale),
+    )
+
+    reference_path = str(environment_scene_path.resolve()).replace("\\", "/")
+    reference_targets = get_environment_reference_targets(environment_scene_path)
+
+    if not reference_targets:
+        raise ValueError(
+            "The external environment USD has no usable top-level prims to reference. "
+            f"File: {environment_scene_path}"
+        )
+
+    for target in reference_targets:
+        target_name = target["name"]
+        source_prim_path = target["path"]
+        child_path = f"{environment_root_path}/{target_name}"
+        # Do not predefine a concrete prim type here. The referenced prim may be
+        # a light, scope, material scope, or geometry Xform. Defining an Xform
+        # locally can mask the referenced type composition.
+        child_prim = stage.DefinePrim(child_path)
+        child_prim.GetReferences().AddReference(reference_path, Sdf.Path(source_prim_path))
+
+    print("Environment mode: external_usd")
+    print(f"Environment asset id: {environment_id}")
+    print(f"Environment display name: {environment_entry.get('display_name', environment_id)}")
+    print(f"Environment USD path: {environment_scene_path}")
+    print(f"Environment reference path: {reference_path}")
+    print(f"Environment referenced prims: {[item['path'] for item in reference_targets]}")
+    print(f"Environment translation m: {translation_m}")
+    print(f"Environment rotation XYZ deg: {rotation_xyz_deg}")
+    print(f"Environment uniform scale: {uniform_scale}")
+
+
+def get_environment_reference_targets(environment_scene_path: Path) -> list[dict[str, str]]:
+    """Return prim targets that should be referenced under /World/Environment.
+
+    Exported Isaac/Omniverse stages often do not set a defaultPrim and may have
+    several root prims. A direct file reference would then be fragile. This
+    function opens the environment stage and references each root prim separately.
+
+    If the stage has a single /World root, reference /World's children instead of
+    nesting another /World under /World/Environment.
+    """
+
+    env_stage = Usd.Stage.Open(str(environment_scene_path))
+    if env_stage is None:
+        raise ValueError(f"Could not open environment USD for inspection: {environment_scene_path}")
+
+    roots = [prim for prim in env_stage.GetPseudoRoot().GetChildren() if prim.IsActive()]
+
+    if len(roots) == 1 and roots[0].GetName() == "World":
+        candidates = [prim for prim in roots[0].GetChildren() if prim.IsActive()]
+    else:
+        candidates = roots
+
+    targets: list[dict[str, str]] = []
+    used_names: set[str] = set()
+
+    for prim in candidates:
+        name = sanitize_usd_identifier(prim.GetName())
+        if not name:
+            continue
+
+        base_name = name
+        suffix = 1
+        while name in used_names:
+            suffix += 1
+            name = f"{base_name}_{suffix}"
+
+        used_names.add(name)
+        targets.append({"name": name, "path": str(prim.GetPath())})
+
+    return targets
+
+
+def sanitize_usd_identifier(value: str) -> str:
+    cleaned = []
+    for index, char in enumerate(str(value)):
+        if char.isalnum() or char == "_":
+            cleaned.append(char)
+        else:
+            cleaned.append("_")
+
+    result = "".join(cleaned).strip("_")
+    if not result:
+        return "Prim"
+
+    if result[0].isdigit():
+        result = "Prim_" + result
+
+    return result
+
+
+def create_plain_debug_environment(stage: Usd.Stage) -> None:
     ground_material = make_material(
         stage,
         "/World/Materials/GroundMat",
@@ -1226,7 +1411,6 @@ def create_environment(stage: Usd.Stage) -> None:
         dimensions=(0.10, 140.0, 48.0),
         material=sky_material,
     )
-
 
 def create_anchor(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
     anchor_position = tuple(scene_config["anchor_position"])

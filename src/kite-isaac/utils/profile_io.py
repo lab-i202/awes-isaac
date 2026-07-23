@@ -25,6 +25,29 @@ GLIDER_ASSET_MODES = [
     "usd_reference",
 ]
 
+ENVIRONMENT_MODES = [
+    "plain_debug",
+    "external_usd",
+]
+
+DEFAULT_ENVIRONMENT = {
+    # plain_debug keeps the original simple ground/backdrop environment.
+    # external_usd references assets/environments/<asset_id>/scene.usda or the
+    # path selected through metadata.json. The entire referenced environment is
+    # loaded under /World/Environment, so this transform moves/rotates/scales it
+    # as one block.
+    "mode": "plain_debug",
+    "asset_id": "flatland_trees_cloudy_01",
+    "translation_m": [0.0, 0.0, 0.0],
+    "rotation_xyz_deg": [0.0, 0.0, 0.0],
+    "uniform_scale": 1.0,
+    # For plain_debug this should stay true. For external_usd, leave false if
+    # the environment already contains a Dome Light / HDRI / sun.
+    "project_lights_enabled": True,
+    "fallback_to_plain_debug": True,
+}
+
+
 DEFAULT_CAMERA_RIG = {
     "enabled": True,
     "show_markers": True,
@@ -158,6 +181,8 @@ def sanitize_filename(value: str) -> str:
 
 
 def normalize_profile_schema(profile: dict[str, Any]) -> None:
+    profile["environment"] = normalize_environment(profile.get("environment", {}))
+
     if "camera_rig" in profile and isinstance(profile["camera_rig"], dict):
         profile["camera_rig"] = normalize_camera_rig(profile["camera_rig"])
 
@@ -165,6 +190,20 @@ def normalize_profile_schema(profile: dict[str, Any]) -> None:
         profile["capture"] = normalize_capture(profile["capture"])
 
     profile["glider_asset"] = normalize_glider_asset(profile.get("glider_asset", {}))
+
+
+def normalize_environment(environment: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(DEFAULT_ENVIRONMENT)
+
+    if isinstance(environment, dict):
+        normalized.update(environment)
+
+    # Backward-friendly defaults. If the user selects an external environment,
+    # assume its own lighting should be used unless explicitly overridden.
+    if str(normalized.get("mode", "plain_debug")) == "external_usd" and "project_lights_enabled" not in environment:
+        normalized["project_lights_enabled"] = False
+
+    return normalized
 
 
 def normalize_capture(capture: dict[str, Any]) -> dict[str, Any]:
@@ -405,6 +444,9 @@ def validate_tethered_glider_profile(profile: dict[str, Any]) -> None:
         if glider[key] <= 0:
             raise ValueError(f"glider.{key} must be greater than zero.")
 
+    profile["environment"] = normalize_environment(profile.get("environment", {}))
+    validate_environment(profile["environment"])
+
     if "camera_rig" in profile:
         profile["camera_rig"] = normalize_camera_rig(profile["camera_rig"])
         validate_camera_rig(profile["camera_rig"])
@@ -415,6 +457,44 @@ def validate_tethered_glider_profile(profile: dict[str, Any]) -> None:
 
     profile["glider_asset"] = normalize_glider_asset(profile.get("glider_asset", {}))
     validate_glider_asset(profile["glider_asset"])
+
+
+def validate_environment(environment: dict[str, Any]) -> None:
+    if not isinstance(environment, dict):
+        raise ValueError("environment must be a JSON object.")
+
+    required_keys = [
+        "mode",
+        "asset_id",
+        "translation_m",
+        "rotation_xyz_deg",
+        "uniform_scale",
+        "project_lights_enabled",
+        "fallback_to_plain_debug",
+    ]
+
+    for key in required_keys:
+        if key not in environment:
+            raise ValueError(f"Missing environment key: {key}")
+
+    if environment["mode"] not in ENVIRONMENT_MODES:
+        raise ValueError("environment.mode must be one of: " + ", ".join(ENVIRONMENT_MODES))
+
+    if not isinstance(environment["asset_id"], str):
+        raise ValueError("environment.asset_id must be a string.")
+
+    _validate_vector3(environment["translation_m"], "environment.translation_m")
+    _validate_vector3(environment["rotation_xyz_deg"], "environment.rotation_xyz_deg")
+
+    _require_number(environment, "uniform_scale")
+    if float(environment["uniform_scale"]) <= 0.0:
+        raise ValueError("environment.uniform_scale must be greater than zero.")
+
+    if not isinstance(environment["project_lights_enabled"], bool):
+        raise ValueError("environment.project_lights_enabled must be true or false.")
+
+    if not isinstance(environment["fallback_to_plain_debug"], bool):
+        raise ValueError("environment.fallback_to_plain_debug must be true or false.")
 
 
 def validate_camera_rig(camera_rig: dict[str, Any]) -> None:

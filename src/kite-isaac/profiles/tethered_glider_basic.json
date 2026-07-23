@@ -5,11 +5,28 @@
     0.0,
     1.0
   ],
-  "tether_length_m": 8.0,
+  "tether_length_m": 6.0,
   "glider_height_m": 1.5,
-  "angular_velocity_rad_s": 1.2,
+  "angular_velocity_rad_s": 2.4,
   "num_frames": 1200,
   "time_step_s": 0.016666666666666666,
+  "environment": {
+    "mode": "external_usd",
+    "asset_id": "flatland_trees_cloudy_01",
+    "translation_m": [
+      -10.0,
+      -100.0,
+      0.0
+    ],
+    "rotation_xyz_deg": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "uniform_scale": 1.0,
+    "project_lights_enabled": false,
+    "fallback_to_plain_debug": true
+  },
   "glider": {
     "wingspan_m": 1.5,
     "length_m": 0.95,
@@ -23,8 +40,8 @@
     "asset_id": "bixler_free3d",
     "uniform_scale": 2.880275508531099,
     "rotation_xyz_deg": [
-      -90.2,
-      190.0,
+      -90.1,
+      189.8,
       90.0
     ],
     "translation_offset_m": [
@@ -52,30 +69,30 @@
       "label": "main_camera_blue",
       "position": [
         -2.5,
-        -12.0,
+        16.0,
         1.0
       ],
       "rotation_deg": [
-        2.3,
-        90.0,
+        2.2,
+        -90.0,
         -0.2
       ]
     },
     "secondary_camera": {
       "label": "secondary_camera_orange",
       "position_offset": [
-        5.0,
+        7.8,
         -0.1,
-        0.0
+        -0.1
       ],
       "rotation_offset_deg": [
         -0.3,
-        0.0,
+        -0.1,
         -0.8
       ]
     },
     "look_at": [
-      0.0,
+      -0.1,
       -0.1,
       1.5
     ],
@@ -89,7 +106,7 @@
     "enabled": true,
     "output_root": "outputs",
     "rgb": true,
-    "rt_subframes": 2,
+    "rt_subframes": 1,
     "camera_params": false,
     "rename_after_capture": false
   },

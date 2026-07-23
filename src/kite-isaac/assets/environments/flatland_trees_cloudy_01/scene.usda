@@ -1,0 +1,1154 @@
+#usda 1.0
+(
+    customLayerData = {
+        dictionary cameraSettings = {
+            dictionary Front = {
+                double3 position = (5, 0, 0)
+                double radius = 5
+            }
+            dictionary Perspective = {
+                double3 position = (140.36627616073693, 182.73518362271852, 7.545419778390971)
+                double3 target = (-2060.7268902568994, -4177.677010321588, 3.1389182304459284)
+            }
+            dictionary Right = {
+                double3 position = (0, -5, 0)
+                double radius = 5
+            }
+            dictionary Top = {
+                double3 position = (0, 0, 5)
+                double radius = 5
+            }
+            string boundCamera = "/OmniverseKit_Persp"
+        }
+        dictionary metricsAssembler = {
+            dictionary "/Largetooth_Aspen" = {
+            }
+            dictionary "/Red_Ash" = {
+            }
+            dictionary "/Red_Ash_Fall" = {
+            }
+            dictionary "/Red_Maple" = {
+            }
+            dictionary "/Red_Maple_01" = {
+            }
+            dictionary "/Red_Oak" = {
+            }
+            dictionary "/Red_Oak_01" = {
+            }
+            dictionary "/Shumard_Oak" = {
+            }
+            dictionary "/Shumard_Oak_01" = {
+            }
+            dictionary "/Shumard_Oak_02" = {
+            }
+            dictionary "/World/grass_with_dirt_patches_material" = {
+            }
+            dictionary "/World/material_plane_and_sphere" = {
+            }
+            dictionary "/Yellow_Pine" = {
+            }
+            dictionary "/grass_with_dirt_patches_material" = {
+            }
+            dictionary "/grass_with_dirt_patches_material_01" = {
+            }
+            int version = 1
+        }
+        dictionary omni_layer = {
+            string authoring_layer = "./ongoing.usd"
+            dictionary locked = {
+            }
+            dictionary muteness = {
+            }
+        }
+        dictionary renderSettings = {
+            double "rtx:pathtracing:aa:filterRadius" = 1.0399999767541885
+            token "rtx:rendermode" = "PathTracing"
+        }
+    }
+    endTimeCode = 1000000
+    metersPerUnit = 1
+    startTimeCode = 0
+    timeCodesPerSecond = 60
+    upAxis = "Z"
+)
+
+def Xform "Environment"
+{
+    quatd xformOp:orient = (1, 0, 0, 0)
+    double3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (0, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+    def DistantLight "defaultLight" (
+        prepend apiSchemas = ["ShapingAPI"]
+    )
+    {
+        float inputs:angle = 1
+        float inputs:intensity = 3000
+        float inputs:shaping:cone:angle = 180
+        float inputs:shaping:cone:softness
+        float inputs:shaping:focus
+        color3f inputs:shaping:focusTint
+        asset inputs:shaping:ies:file
+        quatd xformOp:orient = (0.6532814824381883, 0.27059805007309856, 0.27059805007309856, 0.6532814824381883)
+        double3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:translate = (0, 0, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+    }
+}
+
+def "Render" (
+    hide_in_stage_window = true
+    no_delete = true
+)
+{
+    def "OmniverseKit"
+    {
+        def "HydraTextures" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            def RenderProduct "omni_kit_widget_viewport_ViewportTexture_0" (
+                prepend apiSchemas = ["OmniRtxSettingsCommonAdvancedAPI_1", "OmniRtxSettingsRtAdvancedAPI_1", "OmniRtxSettingsPtAdvancedAPI_1", "OmniRtxPostColorGradingAPI_1", "OmniRtxPostChromaticAberrationAPI_1", "OmniRtxPostBloomPhysicalAPI_1", "OmniRtxPostMatteObjectAPI_1", "OmniRtxPostCompositingAPI_1", "OmniRtxPostDofAPI_1", "OmniRtxPostMotionBlurAPI_1", "OmniRtxPostTvNoiseAPI_1", "OmniRtxPostTonemapIrayReinhardAPI_1", "OmniRtxPostDebugSettingsAPI_1", "OmniRtxDebugSettingsAPI_1"]
+                hide_in_stage_window = true
+                no_delete = true
+            )
+            {
+                rel camera = </OmniverseKit_Persp>
+                token omni:rtx:background:source:texture:textureMode = "repeatMirrored"
+                token omni:rtx:background:source:type = "domeLight"
+                string omni:rtx:material:db:rtSensorNameToIdMap = "DefaultMaterial:0;AsphaltStandardMaterial:1;AsphaltWeatheredMaterial:2;VegetationGrassMaterial:3;WaterStandardMaterial:4;GlassStandardMaterial:5;FiberGlassMaterial:6;MetalAlloyMaterial:7;MetalAluminumMaterial:8;MetalAluminumOxidizedMaterial:9;PlasticStandardMaterial:10;RetroMarkingsMaterial:11;RetroSignMaterial:12;RubberStandardMaterial:13;SoilClayMaterial:14;ConcreteRoughMaterial:15;ConcreteSmoothMaterial:16;OakTreeBarkMaterial:17;FabricStandardMaterial:18;PlexiGlassStandardMaterial:19;MetalSilverMaterial:20"
+                bool omni:rtx:post:registeredCompositing:invertColorCorrection = 1
+                bool omni:rtx:post:registeredCompositing:invertToneMap = 1
+                bool omni:rtx:pt:lightcache:cached:dontResolveConflicts = 1
+                int omni:rtx:pt:maxSamplesPerLaunch = 2073600
+                int omni:rtx:pt:mgpu:maxPixelsPerRegionExponent = 12
+                float omni:rtx:pt:pixelFilter:radius = 1.04
+                token omni:rtx:rendermode = "PathTracing"
+                color3f omni:rtx:rt:ambientLight:color = (0.1, 0.1, 0.1)
+                bool omni:rtx:rt:demoire = 0
+                bool omni:rtx:rt:ecoMode:enabled
+                bool omni:rtx:rt:lightcache:spatialCache:dontResolveConflicts = 1
+                bool omni:rtx:scene:useViewLightingMode
+                uint omni:rtx:viewTile:limit = 4294967295
+                rel orderedVars = </Render/Vars/LdrColor>
+                custom bool overrideClipRange = 0
+                uniform int2 resolution = (1280, 720)
+            }
+        }
+    }
+
+    def RenderSettings "OmniverseGlobalRenderSettings" (
+        prepend apiSchemas = ["OmniRtxSettingsGlobalRtAdvancedAPI_1", "OmniRtxSettingsGlobalPtAdvancedAPI_1"]
+        no_delete = true
+    )
+    {
+        rel products = </Render/OmniverseKit/HydraTextures/omni_kit_widget_viewport_ViewportTexture_0>
+    }
+
+    def "Vars"
+    {
+        def RenderVar "LdrColor" (
+            hide_in_stage_window = true
+            no_delete = true
+        )
+        {
+            uniform string sourceName = "LdrColor"
+        }
+    }
+}
+
+def "grass_with_dirt_patches_material" (
+    prepend payload = @./source/grass_with_dirt_patches_material.glb@
+)
+{
+    quatf xformOp:orient = (0.70710677, -0.70710677, 0, 0)
+    double xformOp:rotateX:unitsResolve = 90
+    float3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (46.39754702534961, 65.47827660843944, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:rotateX:unitsResolve"]
+
+    over "material_plane_and_sphere_fbx"
+    {
+        over "RootNode"
+        {
+            over "pSphere1" (
+                active = false
+            )
+            {
+            }
+
+            over "pPlane1"
+            {
+                over "pPlane1_lambert1_0"
+                {
+                    over "pPlane1_lambert1_0"
+                    {
+                        quatf xformOp:orient = (1, 0, 0, 0)
+                        float3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (0, 0, 0)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                    }
+                }
+            }
+        }
+    }
+}
+
+over "Shumard_Oak_branchShape_MASH1_Instancer_0pR3"
+{
+}
+
+def Xform "arvores" (
+    kind = "group"
+)
+{
+    float3 xformOp:rotateXYZ = (0, 0, 0)
+    float3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (0, 0, 0)
+    float3 xformOp:translate:pivot = (54.598316, -16.884401, 23.118616)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:translate:pivot", "xformOp:rotateXYZ", "xformOp:scale", "!invert!xformOp:translate:pivot"]
+
+    def "Largetooth_Aspen" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Largetooth_Aspen.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (140.21063232421872, -24.328462642852273, 0.0000016441331354144495)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Largetooth_Aspen_01" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Largetooth_Aspen.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (0.8477325, 0.82430154, 0.8381108)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (14.176350174060216, -18.949491454672202, 0.0000018956472899111068)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Largetooth_Aspen_02" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Largetooth_Aspen.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-49.38474862463788, 16.21634363165455, 0.0000017770815217590591)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Largetooth_Aspen_03" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Largetooth_Aspen.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (58.48204394623401, -46.07778869558056, 0.0000017770815217590638)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Red_Ash" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (2.6000001, 2.7, 2.9)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (115.90748269509655, -4.311715126037596, -0.0000036732892567670206)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Ash_branchfrA_instancer"
+        {
+            over "Red_Ash_branchfrA"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Ash_01" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (2.2041044, 2.2256145, 2.4305212)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (36.17560019515254, -33.53522609738088, -0.00000256094183285902)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Ash_branchfrA_instancer"
+        {
+            over "Red_Ash_branchfrA"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Ash_02" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (2.3300316, 2.543205, 2.651837)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-33.90943630271419, -8.080844192121168, -0.00000308531123477806)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Ash_branchfrA_instancer"
+        {
+            over "Red_Ash_branchfrA"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Ash_03" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (2.3300316, 2.543205, 2.651837)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (38.07471981676018, -25.746046284278332, -0.000003085311234778054)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Ash_branchfrA_instancer"
+        {
+            over "Red_Ash_branchfrA"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Ash_Fall" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (3, 3, 3)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (112.53229522705078, -15.741254806518555, -0.000002410038405287196)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Ash_Fall_01" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (3, 3, 3)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (76.39859942745233, -15.741254806518544, -0.000002410038405287196)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Ash_Fall_02" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (2.5431976, 2.4729047, 2.5143323)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (38.18042407743968, -23.895205600803934, -0.0000015021976540416973)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Ash_Fall_03" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (2.5431976, 2.4729047, 2.5143323)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (68.68870861016072, -21.14818329431974, -0.0000015021976540416973)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Ash_Fall_05" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (2.6884983, 2.8257828, 2.7432797)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-27.931154900456608, 1.3696388548909741, -0.000001930160987741785)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Ash_Fall_06" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (2.6884983, 2.8257828, 2.7432797)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (3.0971702751882333, -7.894421212360443, -0.000001930160987741785)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Ash_Fall_07" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (2.6884983, 2.8257828, 2.7432797)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (34.30427256238702, -36.27387634789726, -0.000001930160987741785)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Ash_Fall_08" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Ash_Fall.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (2.6884983, 2.8257828, 2.7432797)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (2.0018224202696118, -34.00859778858752, -0.000001930160987741785)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Maple" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (137.6415557861328, -18.492717742919922, 0.0000016441331354144495)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 297.3358725146279, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Maple_01" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1.2453415, 1.4507322, 1.2817211)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (108.16724089009324, -5.745261112542046, 8.486115632422297e-8)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Maple_02" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (0.8477325, 0.82430154, 0.8381108)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (16.7768590481489, -23.5452114122756, 0.0000018956472899111068)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 297.3358725146279, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Maple_03" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (1.0557164, 1.195841, 1.0742242)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (42.60484427080968, -31.769870320975286, 5.888046076988814e-7)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Maple_04" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-48.751248579785084, 10.290577817700168, 0.0000017770815217590591)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 297.3358725146279, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Maple_05" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (1.1160326, 1.3664851, 1.1720399)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-26.876516837856176, -8.771450984482042, 3.5124166601473654e-7)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Maple_06" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (56.56990230414534, -40.43334566466504, 0.0000017770815217590638)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 297.3358725146279, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Maple_07" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Maple.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (1.1160326, 1.3664851, 1.1720399)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (31.06071262406578, -26.607786988707502, 3.5124166601473697e-7)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Red_Maple_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Red_Maple_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Red_Oak" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (133.1817613824756, -26.42065897817373, -0.000010615608516673092)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Oak_01" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (0.68357563, 0.6433024, 0.79343927)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (98.92749023437501, 2.0612289137167004, -0.00000807688684290042)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Oak_02" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (0.9717622, 0.99002624, 0.9158987)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (18.930183320103666, -5.301104504945667, -0.000008379374565603134)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Oak_03" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (0.57948935, 0.53027517, 0.66499)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (50.06561799327001, -27.28583706231177, -0.0000062516445184825855)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Oak_04" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-42.785199669135196, 16.302590317564324, -0.000009433552994275779)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Oak_05" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (0.61259735, 0.60594445, 0.72554195)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-17.701006429010413, -6.983009432329938, -0.000007112078233202511)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Oak_06" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (52.060580524919956, -47.60300751123757, -0.000009433552994275779)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Red_Oak_07" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Red_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (0.61259735, 0.60594445, 0.72554195)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (22.497133041897307, -30.356602693455986, -0.000007112078233202513)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Shumard_Oak" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (126.16973114013672, -16.741212844848633, 0.0000012560803952510469)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Shumard_Oak_01" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (3.1000001, 3.1000001, 3.1000001)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (94.17573571972648, -26.95147833765174, -0.0000035474854485073393)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_02" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1.6, 1.8000001, 1.8000001)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (86.50223714253862, -9.835833453835727, -2.9365031650741e-7)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI_instancer"
+        {
+            over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Shumard_Oak_03" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (0.8477325, 0.82430154, 0.8381108)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (26.592188850638447, -24.11103009472857, 0.0000015704160983066602)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Shumard_Oak_04" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (2.6279712, 2.555335, 2.598143)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (52.85048374227652, -13.296297890375813, -0.00000245550430276596)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_05" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (1.3563721, 1.4837428, 1.5085995)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (60.59458327454283, -26.764534640300035, 2.7157005526884273e-7)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI_instancer"
+        {
+            over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Shumard_Oak_06" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.98200923, 0, 0, -0.18883291)
+        float3 xformOp:scale = (3.2792468, 3.5402353, 3.3822768)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (25.646261445393222, -24.24538330038125, -0.000004161686551997017)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_07" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (3.2792468, 3.5402353, 3.3822768)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-23.57347519285605, -22.975936015189436, -0.000004161686551997014)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_08" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-39.372278180880336, 5.7685637947252575, 0.0000014222357536855551)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Shumard_Oak_09" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (2.7781153, 2.9199762, 2.8347223)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-9.147336679912563, 6.781209416539473, -0.0000029702728795542875)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_10" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (1.4338657, 1.69547, 1.645968)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-7.170277925525941, -10.634007418277198, 5.1206870853685724e-9)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI_instancer"
+        {
+            over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Shumard_Oak_11" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (46.429844435872056, -38.06840951423913, 0.00000142223575368556)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Shumard_Oak_12" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (2.7781153, 2.9199762, 2.8347223)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (17.155375417691594, -45.65642661990858, -0.000002970272879554285)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_13" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (1.4338657, 1.69547, 1.645968)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (11.423301894879536, -29.09315786488724, 5.1206870853719605e-9)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI_instancer"
+        {
+            over "Shumard_Oak_branchShape_MASH1_Instancer_0jEI"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Shumard_Oak_14" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (3.2792468, 3.5402353, 3.3822768)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-0.4560984606651197, -23.488435884955432, -0.000004161686551997005)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_15" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (3.2792468, 3.5402353, 3.8438165)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (33.48923180928921, -40.41854217140451, -0.000004161686551997005)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_16" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (3.2792468, 3.5402353, 3.3822768)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (72.70578722229133, -40.99121872196807, -0.000004161686551997005)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_17" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (2.9633482, 3.5402353, 4.4629335)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (107.82351550358483, -39.15184654451422, -0.000004161686551997005)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+
+        over "Shumard_Oak_branchShape_MASH1_Instancer_0pR3_instancer"
+        {
+            over "Shumard_Oak_branchShape_MASH1_Instancer_0pR3"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Shumard_Oak_18" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (3.2792468, 3.5402353, 3.3822768)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (89.21346341122525, -40.99512086573388, -0.000004161686551997005)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Shumard_Oak_19" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (3.8554554, 3.5402353, 4.008798)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (133.30664876869892, -36.15464059275236, -0.000004161686551997005)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+
+        over "Shumard_Oak_branchShape_MASH1_Instancer_0snf_instancer"
+        {
+            over "Shumard_Oak_branchShape_MASH1_Instancer_0snf"
+            {
+                quatf xformOp:orient = (1, 0, 0, 0)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def "Shumard_Oak_20" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Shumard_Oak.usd@
+    )
+    {
+        quatf xformOp:orient = (0.07982379, 0, 0, 0.996809)
+        float3 xformOp:scale = (3.2792468, 3.5402353, 3.3822768)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (146.4978735940194, -38.28096485324332, -0.000004161686551997005)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+
+        over "Shumard_Oak_trunk"
+        {
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )
+        }
+    }
+
+    def "Yellow_Pine" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Yellow_Pine.usd@
+    )
+    {
+        quatf xformOp:orient = (1, 0, 0, 0)
+        float3 xformOp:scale = (1, 1, 1)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (121.26167297363281, -24.573619842529297, 0.00000319775222124008)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Yellow_Pine_01" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Yellow_Pine.usd@
+    )
+    {
+        quatf xformOp:orient = (0.044882532, 0, 0, -0.99899226)
+        float3 xformOp:scale = (0.8477325, 0.82430154, 0.8381108)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (30.157151208571282, -17.307649594594796, 0.0000031977522212400745)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Yellow_Pine_02" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Yellow_Pine.usd@
+    )
+    {
+        quatf xformOp:orient = (0.14456518, 0, 0, 0.9894953)
+        float3 xformOp:scale = (0.896166, 0.94192773, 1.4543681)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-33.04704531173941, 11.579423954745657, 0.0000031977522212400736)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Yellow_Pine_03" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Yellow_Pine.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9880172, 0, 0, 0.1543438)
+        float3 xformOp:scale = (0.8477325, 0.82430154, 0.8381108)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (-26.460615025261205, -30.731237364337186, 0.0000031977522212400766)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+
+    def "Yellow_Pine_04" (
+        prepend payload = @https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Vegetation/Trees/Yellow_Pine.usd@
+    )
+    {
+        quatf xformOp:orient = (0.9993864, 0, 0, -0.03502519)
+        float3 xformOp:scale = (0.896166, 0.94192773, 0.91442657)
+        double3 xformOp:scale:unitsResolve = (0.009999999776482582, 0.009999999776482582, 0.009999999776482582)
+        double3 xformOp:translate = (41.52608324036916, -45.12020310067197, 0.0000031977522212400736)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOp:scale:unitsResolve"]
+    }
+}
+
+def DomeLight "DomeLight" (
+    prepend apiSchemas = ["ShapingAPI"]
+)
+{
+    float inputs:intensity = 1000
+    float inputs:shaping:cone:angle = 180
+    float inputs:shaping:cone:softness
+    float inputs:shaping:focus
+    color3f inputs:shaping:focusTint
+    asset inputs:shaping:ies:file
+    asset inputs:texture:file = @./hdri/autumn_field_8k.hdr@
+    token inputs:texture:format = "latlong"
+    quatd xformOp:orient = (1, 0, 0, 0)
+    double3 xformOp:scale = (1, 1, 1)
+    double3 xformOp:translate = (0, 0, 0)
+    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+}
+
+
+

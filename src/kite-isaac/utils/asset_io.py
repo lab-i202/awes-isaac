@@ -13,6 +13,8 @@ from typing import Any
 
 
 ASSET_REGISTRY_RELATIVE_PATH = Path("assets") / "asset_registry.json"
+ENVIRONMENTS_RELATIVE_PATH = Path("assets") / "environments"
+
 
 
 SUPPORTED_SOURCE_EXTENSIONS = {
@@ -25,6 +27,12 @@ SUPPORTED_SOURCE_EXTENSIONS = {
 }
 
 USD_EXTENSIONS = {
+    ".usd",
+    ".usda",
+    ".usdc",
+}
+
+ENVIRONMENT_SCENE_EXTENSIONS = {
     ".usd",
     ".usda",
     ".usdc",
@@ -178,3 +186,105 @@ def get_asset_status(project_root: Path, asset_id: str, asset_entry: dict[str, A
 def collect_registry_status(project_root: Path, registry: dict[str, Any]) -> list[dict[str, Any]]:
     assets = get_assets(registry)
     return [get_asset_status(project_root, asset_id, asset_entry) for asset_id, asset_entry in assets.items()]
+
+
+# -----------------------------------------------------------------------------
+# Environment asset discovery
+# -----------------------------------------------------------------------------
+
+
+def default_environments_root(project_root: Path) -> Path:
+    return project_root / ENVIRONMENTS_RELATIVE_PATH
+
+
+def discover_environment_assets(project_root: Path) -> list[dict[str, Any]]:
+    """Discover local environment folders under assets/environments/.
+
+    Expected minimal layout:
+        assets/environments/<environment_id>/metadata.json
+        assets/environments/<environment_id>/scene.usda
+
+    metadata.json is optional for discovery, but strongly recommended.
+    If it is missing, the folder name is used as asset_id/display_name and the
+    first scene.usd/usda/usdc file is used.
+    """
+
+    environments_root = default_environments_root(project_root)
+    if not environments_root.exists() or not environments_root.is_dir():
+        return []
+
+    entries: list[dict[str, Any]] = []
+
+    for folder in sorted(environments_root.iterdir(), key=lambda item: item.name.lower()):
+        if not folder.is_dir():
+            continue
+
+        asset_id = folder.name
+        metadata_path = folder / "metadata.json"
+        metadata: dict[str, Any] = {}
+
+        if metadata_path.exists() and metadata_path.is_file():
+            try:
+                loaded = json.loads(metadata_path.read_text(encoding="utf-8-sig"))
+                if isinstance(loaded, dict):
+                    metadata = loaded
+            except json.JSONDecodeError:
+                metadata = {}
+
+        asset_id = str(metadata.get("asset_id", asset_id)).strip() or folder.name
+        display_name = str(metadata.get("display_name", asset_id)).strip() or asset_id
+        scene_path_value = str(metadata.get("scene_path", "scene.usda")).strip() or "scene.usda"
+        scene_path = resolve_project_path(project_root, ENVIRONMENTS_RELATIVE_PATH / folder.name / scene_path_value)
+
+        if not scene_path.exists() or not scene_path.is_file():
+            scene_candidates = [
+                path for path in folder.iterdir()
+                if path.is_file() and path.suffix.lower() in ENVIRONMENT_SCENE_EXTENSIONS
+            ]
+            if scene_candidates:
+                scene_path = sorted(scene_candidates, key=lambda item: item.name.lower())[0].resolve()
+                try:
+                    scene_path_value = str(scene_path.relative_to(folder)).replace("\\", "/")
+                except ValueError:
+                    scene_path_value = scene_path.name
+
+        try:
+            relative_scene_path = str(scene_path.relative_to(project_root)).replace("\\", "/")
+        except ValueError:
+            relative_scene_path = str(scene_path).replace("\\", "/")
+
+        entries.append(
+            {
+                "asset_id": asset_id,
+                "display_name": display_name,
+                "folder_name": folder.name,
+                "folder_path": str(folder.resolve()),
+                "metadata_path": str(metadata_path.resolve()),
+                "scene_path": relative_scene_path,
+                "scene_path_in_folder": scene_path_value.replace("\\", "/"),
+                "scene_path_abs": str(scene_path.resolve()),
+                "scene_exists": scene_path.exists() and scene_path.is_file(),
+                "metadata": metadata,
+            }
+        )
+
+    # Show usable assets first.
+    return sorted(entries, key=lambda item: (not bool(item["scene_exists"]), str(item["asset_id"]).lower()))
+
+
+def get_environment_asset_entry(project_root: Path, environment_id: str) -> dict[str, Any]:
+    environment_id = str(environment_id).strip()
+    if not environment_id:
+        raise KeyError("Environment asset ID cannot be empty.")
+
+    entries = discover_environment_assets(project_root)
+    for entry in entries:
+        if entry["asset_id"] == environment_id or entry["folder_name"] == environment_id:
+            return entry
+
+    raise KeyError(f"Environment asset ID not found under assets/environments: {environment_id}")
+
+
+def get_environment_scene_path(project_root: Path, environment_id: str) -> Path:
+    entry = get_environment_asset_entry(project_root, environment_id)
+    return Path(str(entry["scene_path_abs"])).resolve()

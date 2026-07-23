@@ -1,49 +1,99 @@
-# kite_isaac_live_dashboard_exports_v14
+# kite_isaac_environment_loader_v15
 
-Focused patch for live telemetry and reproducible dashboard exports.
+This patch adds an external environment loader with whole-scene transform controls.
 
-Replace/add:
+## Replace/add these files
 
 ```text
+utils/asset_io.py
+utils/profile_io.py
+gui/scene_profile_gui.py
 scenario/tethered_glider_scene.py
-dashboard_streamlit.py
 ```
 
-No changes are required to `main.py`, the GUI, asset registry, or capture profile.
+`dashboard_streamlit.py` is included unchanged from v14 for convenience.
 
 ## What changed
 
-### 1. Live frame_state.csv streaming
-
-The previous code wrote `frame_state.csv` only after the Isaac capture finished. The dashboard could show live camera images, but telemetry plots stayed stale until the final CSV was written.
-
-Now Isaac writes one `frame_state.csv` row per timestep during capture and flushes each row immediately. At the end of the run, the final `frame_state.csv` is rewritten once from the final manifest so filenames remain correct, including the post-rename case.
-
-### 2. Live last_frame.png update
-
-`camera_main/last_frame.png` and `camera_secondary/last_frame.png` are now updated during capture when new RGB images become available. The final last-frame copy is still written at the end of capture.
-
-### 3. Dashboard reads partial CSVs safely
-
-The dashboard now reads CSVs with `on_bad_lines="skip"` so one transient partial row cannot crash the dashboard while Isaac is writing.
-
-### 4. Faster refresh slider
-
-The dashboard slider now accepts 10 ms minimum. This is allowed, but it asks Streamlit for 100 full reruns per second and can overload the app. Prefer 100-500 ms unless you are briefly debugging.
-
-### 5. Export bundles
-
-Telemetry and trajectory plots now export a reproducible bundle:
+- Existing `plain_debug` scene remains available and unchanged.
+- New `external_usd` environment mode loads local environment folders from:
 
 ```text
-.png
-.svg
-.pdf
-.html
-.plotly.json
-.data.csv
-.data.json
+assets/environments/<environment_id>/
 ```
 
-The export uses explicit width, height, scale, white background, and Plotly layout settings so the result does not silently change aspect ratio or drop colors.
+- The GUI now has an **Environment** tab.
+- Environment dropdown is populated from local folders under `assets/environments/`.
+- The whole imported environment is loaded under:
 
+```text
+/World/Environment
+```
+
+- The whole imported environment can be transformed together:
+
+```text
+translation_m
+rotation_xyz_deg
+uniform_scale
+```
+
+- Project-created objects still remain separate:
+
+```text
+/World/Glider
+/World/Cameras
+/World/CameraMarkers
+/World/Tether
+/World/Anchor
+```
+
+- `frame_state.csv` now logs:
+
+```text
+environment_mode
+environment_asset_id
+environment_scene_path
+environment_translation_x_m
+environment_translation_y_m
+environment_translation_z_m
+environment_rotation_x_deg
+environment_rotation_y_deg
+environment_rotation_z_deg
+environment_uniform_scale
+```
+
+## Expected environment folder
+
+Your current folder is correct:
+
+```text
+assets/environments/flatland_trees_cloudy_01/
+    metadata.json
+    scene.usda
+    hdri/autumn_field_8k.hdr
+    source/grass_with_dirt_patches_material.glb
+    textures/
+```
+
+## First GUI settings
+
+Open the GUI and set:
+
+```text
+Environment mode: external_usd
+External environment ID: flatland_trees_cloudy_01
+Translation: [0, 0, 0]
+Rotation XYZ: [0, 0, 0]
+Uniform scale: 1
+Use project default lights: unchecked
+Fallback to plain_debug: checked
+```
+
+Use the transform fields only if the glider/camera rig is not centered over the useful grass field.
+
+## Notes
+
+If the imported environment already has a Dome Light / HDRI / sun, leave project default lights off to avoid double lighting.
+
+The NVIDIA tree URLs in the scene are still external dependencies. That is acceptable for local development but not fully self-contained.

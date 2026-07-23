@@ -1,0 +1,7 @@
+{
+  "asset_id": "flatland_trees_cloudy_01",
+  "display_name": "Flatland Trees Cloudy 01",
+  "scene_path": "assets/environments/flatland_trees_cloudy_01/scene.usda",
+  "type": "external_usd_environment",
+  "notes": "Ground plane, background trees, HDRI dome light. Validate scale and lighting."
+}
