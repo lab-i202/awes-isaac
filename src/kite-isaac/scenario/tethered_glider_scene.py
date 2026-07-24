@@ -15,6 +15,7 @@ import csv
 import json
 import math
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,11 +31,19 @@ from utils.asset_io import (
     get_environment_scene_path,
     load_asset_registry,
 )
-from utils.profile_io import normalize_camera_rig, normalize_environment, sanitize_filename
+from utils.profile_io import normalize_camera_rig, normalize_environment, normalize_render, normalize_tether_visual, sanitize_filename
+from utils.run_logger import PerformanceRecorder, RunLogger, make_run_id
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+
+
+def get_scene_output_dir(scene_config: dict[str, Any]) -> Path:
+    capture_cfg = scene_config.get("capture", {})
+    output_root = PROJECT_ROOT / capture_cfg.get("output_root", "outputs")
+    scene_dir_name = sanitize_filename(str(scene_config.get("scene_name", "scene")))
+    return output_root / scene_dir_name
 
 
 # -----------------------------------------------------------------------------
@@ -53,7 +62,27 @@ def run_tethered_glider_scene(
     except Exception as exc:
         print(f"[warning] reset_render_settings failed: {exc}")
 
-    configure_renderer()
+    render_cfg = normalize_render(scene_config.get("render", {}))
+    scene_config["render"] = render_cfg
+    configure_renderer(render_cfg)
+
+    output_dir_for_logs = get_scene_output_dir(scene_config)
+    output_dir_for_logs.mkdir(parents=True, exist_ok=True)
+    run_id = make_run_id(str(scene_config.get("scene_name", "scene")))
+    run_logger = RunLogger(output_dir_for_logs, str(scene_config.get("scene_name", "scene")), run_id=run_id)
+    performance = PerformanceRecorder(
+        output_dir=output_dir_for_logs,
+        scene_name=str(scene_config.get("scene_name", "scene")),
+        run_id=run_id,
+        num_frames=int(scene_config.get("num_frames", 0)),
+        time_step_s=float(scene_config.get("time_step_s", 0.0)),
+        camera_count=2 if bool(scene_config.get("camera_rig", {}).get("enabled", True)) and bool(scene_config.get("capture", {}).get("enabled", False)) else 0,
+    )
+    try:
+        (output_dir_for_logs / "profile_used.json").write_text(json.dumps(scene_config, indent=2), encoding="utf-8")
+    except Exception as exc:
+        run_logger.warning("setup", "profile_snapshot_failed", f"Could not write profile_used.json: {exc}")
+    run_logger.info("setup", "run_started", "Isaac scene run started.", details={"output_dir": str(output_dir_for_logs), "render": render_cfg})
 
     environment_cfg = normalize_environment(scene_config.get("environment", {}))
     scene_config["environment"] = environment_cfg
@@ -65,7 +94,8 @@ def run_tethered_glider_scene(
 
     create_environment(stage, scene_config)
     create_anchor(stage, scene_config)
-    create_tether_curve(stage)
+    scene_config["tether_visual"] = normalize_tether_visual(scene_config.get("tether_visual", {}))
+    create_tether_curve(stage, scene_config)
     create_glider_visual(stage, scene_config)
 
     capture_cfg = scene_config.get("capture", {})
@@ -114,6 +144,10 @@ def run_tethered_glider_scene(
     print(f"Environment translation m: {environment_cfg.get('translation_m', [0.0, 0.0, 0.0])}")
     print(f"Environment rotation XYZ deg: {environment_cfg.get('rotation_xyz_deg', [0.0, 0.0, 0.0])}")
     print(f"Environment uniform scale: {environment_cfg.get('uniform_scale', 1.0)}")
+    print(f"Run id: {run_id}")
+    print(f"Render profile: {render_cfg.get('profile')}")
+    print(f"Headless: {render_cfg.get('headless')}; disable viewport updates: {render_cfg.get('disable_viewport_updates')}")
+    print(f"Tether visual: {scene_config['tether_visual']}")
 
     if camera_enabled:
         print(f"Camera orientation mode: {camera_rig_cfg['orientation_mode']}")
@@ -168,25 +202,35 @@ def run_tethered_glider_scene(
             )
 
         for frame_index in range(num_frames):
+            frame_start = time.perf_counter()
             sim_time_s = frame_index * time_step_s
 
+            t0 = time.perf_counter()
             update_tethered_glider_motion(
                 stage=stage,
                 scene_config=scene_config,
                 sim_time_s=sim_time_s,
             )
+            motion_update_ms = (time.perf_counter() - t0) * 1000.0
 
+            t0 = time.perf_counter()
             simulation_app.update()
+            simulation_update_ms = (time.perf_counter() - t0) * 1000.0
 
+            capture_step_ms = 0.0
             if capture_enabled and camera_enabled and rep is not None:
+                t0 = time.perf_counter()
                 rep.orchestrator.step(
                     rt_subframes=int(capture_cfg.get("rt_subframes", 1)),
                     pause_timeline=True,
                     delta_time=0.0,
                     wait_for_render=True,
                 )
+                capture_step_ms = (time.perf_counter() - t0) * 1000.0
 
+            state_write_ms = 0.0
             if live_state_writer is not None:
+                t0 = time.perf_counter()
                 live_state_writer.write_row(
                     compute_glider_state_row(
                         scene_config=scene_config,
@@ -195,11 +239,31 @@ def run_tethered_glider_scene(
                         manifest_map={},
                     )
                 )
+                state_write_ms = (time.perf_counter() - t0) * 1000.0
 
+            last_frame_update_ms = 0.0
             if live_last_frame_updater is not None:
+                t0 = time.perf_counter()
                 live_last_frame_updater.update()
+                last_frame_update_ms = (time.perf_counter() - t0) * 1000.0
+
+            frame_total_ms = (time.perf_counter() - frame_start) * 1000.0
+            performance.write_frame_timing(
+                {
+                    "frame_index": frame_index,
+                    "sim_timestamp_s": f"{sim_time_s:.9f}",
+                    "motion_update_ms": f"{motion_update_ms:.6f}",
+                    "simulation_update_ms": f"{simulation_update_ms:.6f}",
+                    "capture_step_ms": f"{capture_step_ms:.6f}",
+                    "state_write_ms": f"{state_write_ms:.6f}",
+                    "last_frame_update_ms": f"{last_frame_update_ms:.6f}",
+                    "frame_total_ms": f"{frame_total_ms:.6f}",
+                    "num_images_expected": 2 if capture_enabled and camera_enabled else 0,
+                }
+            )
 
             if frame_index % 60 == 0:
+                run_logger.info("simulation", "frame_progress", f"Frame {frame_index}/{num_frames} completed.", frame_index=frame_index, details={"frame_total_ms": frame_total_ms})
                 glider_position = compute_glider_position(scene_config, sim_time_s)
                 constraint_error = compute_tether_constraint_error(
                     scene_config=scene_config,
@@ -266,6 +330,15 @@ def run_tethered_glider_scene(
             live_state_writer.close()
 
         cleanup_capture(render_products=render_products, writers=writers)
+        try:
+            performance.close()
+        except Exception as exc:
+            print(f"[warning] performance.close failed: {exc}")
+        try:
+            run_logger.info("shutdown", "run_finished", "Simulation finished.")
+            run_logger.close()
+        except Exception as exc:
+            print(f"[warning] run_logger.close failed: {exc}")
 
     print("Simulation finished.")
 
@@ -288,10 +361,21 @@ def create_empty_stage() -> Usd.Stage:
     return stage
 
 
-def configure_renderer() -> None:
+def configure_renderer(render_cfg: dict[str, Any] | None = None) -> None:
+    render_cfg = normalize_render(render_cfg or {})
     settings = carb.settings.get_settings()
-    settings.set("/rtx/rendermode", "RealTimePathTracing")
-    settings.set("/rtx/post/dlss/execMode", 1)
+    settings.set("/rtx/rendermode", str(render_cfg.get("renderer", "RealTimePathTracing")))
+    settings.set("/rtx/post/dlss/execMode", int(render_cfg.get("dlss_mode", 1)))
+    settings.set("/rtx/pathtracing/spp", int(render_cfg.get("samples_per_pixel_per_frame", 64)))
+    settings.set("/rtx/pathtracing/totalSpp", int(render_cfg.get("samples_per_pixel_per_frame", 64)))
+    settings.set("/rtx/pathtracing/maxBounces", int(render_cfg.get("max_bounces", 4)))
+    settings.set("/rtx/denoising/enabled", bool(render_cfg.get("denoiser", True)))
+    if bool(render_cfg.get("disable_viewport_updates", False)):
+        try:
+            settings.set("/app/player/playSimulations", True)
+            settings.set("/app/viewport/grid/enabled", False)
+        except Exception:
+            pass
 
 
 # -----------------------------------------------------------------------------
@@ -2508,20 +2592,28 @@ def create_anchor(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
     )
 
 
-def create_tether_curve(stage: Usd.Stage) -> None:
+def create_tether_curve(stage: Usd.Stage, scene_config: dict[str, Any]) -> None:
+    tether_visual = normalize_tether_visual(scene_config.get("tether_visual", {}))
+    color = tether_visual.get("diffuse_color", [0.02, 0.02, 0.02])
+    radius = float(tether_visual.get("radius_m", 0.015))
+    width = max(2.0 * radius, 0.001)
+
     material = make_material(
         stage,
         "/World/Materials/TetherMat",
-        color=(0.02, 0.02, 0.02),
-        roughness=0.4,
-        metallic=0.0,
+        color=(float(color[0]), float(color[1]), float(color[2])),
+        roughness=float(tether_visual.get("roughness", 0.5)),
+        metallic=float(tether_visual.get("metallic", 0.0)),
     )
 
     curve = UsdGeom.BasisCurves.Define(stage, "/World/Tether")
     curve.CreateTypeAttr("linear")
     curve.CreateCurveVertexCountsAttr([2])
     curve.CreatePointsAttr([Gf.Vec3f(0.0, 0.0, 0.0), Gf.Vec3f(1.0, 0.0, 0.0)])
-    curve.CreateWidthsAttr([0.025, 0.025])
+    curve.CreateWidthsAttr([width, width])
+
+    if not bool(tether_visual.get("enabled", True)):
+        curve.GetPrim().CreateAttribute("visibility", Sdf.ValueTypeNames.Token).Set("invisible")
 
     bind_material(curve.GetPrim(), material)
 
@@ -3162,9 +3254,9 @@ def build_camera_layout_plan_svg(diagnostics: dict[str, Any], view_mode: str = "
         y += 17
         elements.append(f'<text x="{info["x"] + 18}" y="{y:.1f}" font-size="12" font-family="Arial" fill="#555">forward {esc(fmt3(f))}; anchor inside={esc(cam["anchor_coverage"]["inside"])} </text>')
         y += 17
-        elements.append(f'<text x="{info["x"] + 18}" y="{y:.1f}" font-size="12" font-family="Arial" fill="#321">plot h_tri={item["triangle_height_m"]:.3f} m; d_E={item["anchor_distance_euclidean_m"]:.3f} m; d_XY={item["anchor_distance_xy_m"]:.3f} m</text>')
+        elements.append(f'<text x="{info["x"] + 18}" y="{y:.1f}" font-size="12" font-family="Arial" fill="#555">plot h_tri={item["triangle_height_m"]:.3f} m; d_E={item["anchor_distance_euclidean_m"]:.3f} m; d_XY={item["anchor_distance_xy_m"]:.3f} m</text>')
         y += 17
-        elements.append(f'<text x="{info["x"] + 18}" y="{y:.1f}" font-size="12" font-family="Arial" fill="#333">Δx(anchor-camera)={item["anchor_dx_m"]:.3f} m; Δy(anchor-camera)={item["anchor_dy_m"]:.3f} m; Δz={item["anchor_dz_m"]:.3f} m</text>')
+        elements.append(f'<text x="{info["x"] + 18}" y="{y:.1f}" font-size="12" font-family="Arial" fill="#555">Δx(anchor-camera)={item["anchor_dx_m"]:.3f} m; Δy(anchor-camera)={item["anchor_dy_m"]:.3f} m; Δz={item["anchor_dz_m"]:.3f} m</text>')
         y += 26
 
     elements.append(f'<text x="70" y="1045" font-size="14" font-family="Arial" fill="#555">Important: this SVG is a pure XY plan view. It draws only horizontal FOV wedges. Use camera_rig_layout_elevation.svg for vertical FOV and camera pitch/height checks.</text>')

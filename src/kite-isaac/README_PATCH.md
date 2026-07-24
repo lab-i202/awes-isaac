@@ -1,142 +1,175 @@
-# kite_isaac_camera_anchor_metrics_v21
+# kite_isaac_dashboard_state_export_v24
 
-This patch extends the **camera plan-view diagnostics** so each camera wedge reports:
+This patch adds a **simulation-state export button** to the Streamlit dashboard.
 
-- the **triangle height** of the plotted horizontal-FOV wedge,
-- the camera-to-anchor **Euclidean distance**,
-- the camera-to-anchor **XY distance**,
-- the signed **Δx** and **Δy** from camera to anchor,
-- and the signed **Δz** from camera to anchor.
-
-This directly addresses the request to make the plan-view SVG more informative for stereo-geometry interpretation.
+The goal is to make it easy to share the state of a simulation run for debugging without sending the full RGB image sequence.
 
 ---
 
-## What changed
+## Files to replace
 
-### 1) `scenario/tethered_glider_scene.py`
+Replace only:
 
-The camera-rig diagnostics now compute and expose additional per-camera quantities.
+```text
+dashboard_streamlit.py
+README_PATCH.md
+```
 
-#### Added numeric camera-to-anchor diagnostics
-For each camera, the generated JSON / CSV diagnostics now include:
-
-- `anchor_relative.dx_anchor_minus_camera_m`
-- `anchor_relative.dy_anchor_minus_camera_m`
-- `anchor_relative.dz_anchor_minus_camera_m`
-- `anchor_relative.distance_xy_m`
-- `anchor_relative.distance_euclidean_m`
-
-These are also appended to `camera_rig_layout_summary.csv` as rows such as:
-
-- `camera_main_anchor_dx`
-- `camera_main_anchor_dy`
-- `camera_main_anchor_distance_xy`
-- `camera_main_anchor_distance_euclidean`
-- same for `camera_secondary`
-
-#### Added plan-view triangle height
-Inside the pure-XY plan-view builder, each camera wedge now computes:
-
-- `base_midpoint`
-- `triangle_height_m`
-
-where `triangle_height_m` is the perpendicular distance from the camera apex to the base segment of the horizontal-FOV triangle shown in the plot.
-
-In other words, if the plotted triangle is:
-
-- apex = camera origin in XY,
-- base endpoints = the left/right clipped ray endpoints,
-
-then the triangle height is the length from the apex to the midpoint of the base.
-
-#### SVG overlays added
-In `camera_rig_layout.svg` / `camera_rig_layout_plan_roi.svg` / `camera_rig_layout_plan_full.svg`, each camera now shows:
-
-- a dashed **triangle-height line** from apex to base midpoint,
-- an **`h_tri=... m`** label next to that line,
-- camera annotation text including:
-  - `h_tri`
-  - `d_E` (Euclidean distance to anchor)
-  - `Δx(A-C)`
-  - `Δy(A-C)`
-
-The numeric side panel now also includes, for each camera:
-
-- plotted triangle height,
-- Euclidean distance to anchor,
-- XY distance to anchor,
-- signed `Δx`, `Δy`, and `Δz`.
+No Isaac Sim scene code is changed by this patch.
 
 ---
 
-## Interpretation notes
+## What this patch adds
 
-### Distance sign convention
-The deltas use:
+In the dashboard `Files` tab, there is now a new section:
 
-- `Δx = anchor_x - camera_x`
-- `Δy = anchor_y - camera_y`
-- `Δz = anchor_z - camera_z`
+```text
+Simulation state export
+```
 
-So these are **signed offsets from the camera to the anchor** in world coordinates.
+with a button:
 
-### Triangle height meaning
-The reported `h_tri` is the height of the **drawn plan-view triangle**, not a 3D frustum depth quantity.
+```text
+Download simulation state ZIP
+```
 
-Because the ROI plan view may clip the ray length for readability, `h_tri` corresponds to the actual triangle drawn in that figure.
-
-That is exactly what you asked for: a value associated with each displayed triangle.
+The ZIP contains the relevant diagnostic/configuration files needed to inspect or share a run state.
 
 ---
 
-## Files changed
+## What the export ZIP includes
 
-Replace:
+The generated ZIP includes:
 
-- `scenario/tethered_glider_scene.py`
+```text
+dashboard_export_summary.json
+archive_inventory.json
+dataset_file_inventory.csv
 
-No dashboard logic change was required for this patch because the dashboard already renders the SVGs produced by the scene generator.
+run/profile_used.json
+run/frame_state.csv
+run/capture_manifest.csv
+run/camera_rig_metadata.json
+run/validation_report.json
+run/camera_rig_layout.json
+run/camera_rig_layout_summary.csv
+
+layout/camera_rig_layout*.svg
+
+logs/run.log
+logs/events.jsonl
+logs/warnings.jsonl
+logs/errors.jsonl
+
+performance/frame_timing.csv
+performance/module_timing.csv
+performance/run_performance_summary.json
+
+latest_images/camera_main_last_frame.png
+latest_images/camera_main_<latest rgb>.png
+latest_images/camera_secondary_last_frame.png
+latest_images/camera_secondary_<latest rgb>.png
+
+project/render_profiles.json
+```
+
+The exact content depends on which files exist for the selected output scene.
 
 ---
 
-## Expected outputs after running again
+## What it intentionally does not include
 
-After a new run, you should see updated values in:
+It does **not** include every RGB frame:
 
-- `camera_rig_layout.svg`
-- `camera_rig_layout_plan_roi.svg`
-- `camera_rig_layout_plan_full.svg`
-- `camera_rig_layout.json`
-- `camera_rig_layout_summary.csv`
+```text
+camera_main/rgb_*.png
+camera_secondary/rgb_*.png
+```
 
----
+Reason: that would make the support ZIP unnecessarily huge.
 
-## Quick verification checklist
+Instead, it includes:
 
-After running a scene:
+```text
+last_frame.png
+latest rgb_*.png
+```
 
-1. Open the **Camera layout** tab in the dashboard.
-2. In the plan view, confirm that each camera wedge has:
-   - a dashed internal height line,
-   - an `h_tri=... m` label.
-3. Check the right-side numeric panel and confirm each camera lists:
-   - `d_E`
-   - `d_XY`
-   - `Δx`
-   - `Δy`
-   - `Δz`
-4. Open `camera_rig_layout_summary.csv` and confirm the new rows were written.
+for each camera.
+
+This is enough to diagnose most scene, camera, render, timing, logging, and dashboard-state problems.
 
 ---
 
-## Important note
+## Generated summary file
 
-This patch improves diagnostics only. It does **not** change:
+The ZIP includes:
 
-- capture geometry,
-- camera placement,
-- render settings,
-- glider dynamics,
-- or dashboard scene-selection behavior.
+```text
+dashboard_export_summary.json
+```
+
+This records:
+
+```text
+export timestamp
+project root
+dataset directory
+scene name
+whether full RGB sequence is included
+row counts loaded by dashboard
+performance summary
+validation summary
+recent frame_state preview
+recent frame_timing preview
+recent module_timing preview
+```
+
+---
+
+## Generated inventories
+
+The ZIP includes two inventories:
+
+```text
+archive_inventory.json
+```
+
+This lists what was attempted for inclusion, whether it existed, and whether it was included.
+
+```text
+dataset_file_inventory.csv
+```
+
+This lists all files found inside the selected dataset output folder, including relative path, size, and modification time.
+
+This is useful when debugging missing/oversized/unexpected files.
+
+---
+
+## How to use
+
+1. Run a simulation.
+2. Open the dashboard.
+3. Select the output scene in the sidebar.
+4. Go to the `Files` tab.
+5. Click `Download simulation state ZIP`.
+6. Share that ZIP when debugging the run state.
+
+---
+
+## Notes
+
+This patch does not change:
+
+```text
+render settings
+capture logic
+Isaac Sim execution
+telemetry logging
+performance logging
+camera layout generation
+```
+
+It only adds a dashboard-side export bundle.
 

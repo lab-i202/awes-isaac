@@ -23,9 +23,14 @@ from utils.profile_io import (
     DEFAULT_CAPTURE,
     DEFAULT_GLIDER_ASSET,
     DEFAULT_ENVIRONMENT,
+    DEFAULT_RENDER,
+    DEFAULT_TETHER_VISUAL,
     ENVIRONMENT_MODES,
+    RENDER_PROFILE_NAMES,
     GLIDER_ASSET_MODES,
     normalize_environment,
+    normalize_render,
+    normalize_tether_visual,
     compute_parallel_rig_pitch_yaw_roll_deg,
     focal_length_mm_from_horizontal_fov,
     default_profile_path,
@@ -215,11 +220,28 @@ class SceneProfileGui:
         self.scene_name = tk.StringVar()
         self.selected_scene_name = tk.StringVar()
 
+        self.render_profile = tk.StringVar()
+        self.render_headless = tk.BooleanVar()
+        self.render_hide_ui = tk.BooleanVar()
+        self.render_disable_viewport_updates = tk.BooleanVar()
+        self.render_renderer = tk.StringVar()
+        self.render_width = tk.IntVar()
+        self.render_height = tk.IntVar()
+        self.render_anti_aliasing = tk.IntVar()
+        self.render_dlss_mode = tk.IntVar()
+        self.render_samples_per_pixel = tk.IntVar()
+        self.render_max_bounces = tk.IntVar()
+        self.render_denoiser = tk.BooleanVar()
+        self.render_sync_loads = tk.BooleanVar()
+
         self.anchor_x = tk.DoubleVar()
         self.anchor_y = tk.DoubleVar()
         self.anchor_z = tk.DoubleVar()
 
         self.tether_length_m = tk.DoubleVar()
+        self.tether_visual_enabled = tk.BooleanVar()
+        self.tether_visual_radius_m = tk.DoubleVar()
+        self.tether_visual_color_hex = tk.StringVar()
         self.glider_height_m = tk.DoubleVar()
         self.angular_velocity_rad_s = tk.DoubleVar()
 
@@ -358,22 +380,28 @@ class SceneProfileGui:
         notebook.pack(side="top", fill="both", expand=True)
 
         scene_scroll = ScrollableFrame(notebook)
+        render_scroll = ScrollableFrame(notebook)
         environment_scroll = ScrollableFrame(notebook)
         glider_scroll = ScrollableFrame(notebook)
         camera_scroll = ScrollableFrame(notebook)
         capture_scroll = ScrollableFrame(notebook)
+        info_scroll = ScrollableFrame(notebook)
 
         notebook.add(scene_scroll, text="Scene")
+        notebook.add(render_scroll, text="Render")
         notebook.add(environment_scroll, text="Environment")
         notebook.add(glider_scroll, text="Glider")
         notebook.add(camera_scroll, text="Cameras")
         notebook.add(capture_scroll, text="Capture")
+        notebook.add(info_scroll, text="Info")
 
         self._build_scene_tab(scene_scroll.content)
+        self._build_render_tab(render_scroll.content)
         self._build_environment_tab(environment_scroll.content)
         self._build_glider_tab(glider_scroll.content)
         self._build_camera_tab(camera_scroll.content)
         self._build_capture_tab(capture_scroll.content)
+        self._build_info_tab(info_scroll.content)
 
     def _build_scene_tab(self, parent: ttk.Frame) -> None:
         parent.configure(padding=12)
@@ -436,6 +464,16 @@ class SceneProfileGui:
 
         self._add_float_row(parent, row, "Tether length [m]", self.tether_length_m)
         row += 1
+        ttk.Checkbutton(
+            parent,
+            text="Show tether visual cylinder/curve",
+            variable=self.tether_visual_enabled,
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 4))
+        row += 1
+        self._add_float_row(parent, row, "Tether visual radius [m]", self.tether_visual_radius_m)
+        row += 1
+        self._add_color_row(parent, row, "Tether visual color", self.tether_visual_color_hex, self._on_pick_tether_visual_color)
+        row += 1
         self._add_float_row(parent, row, "Glider height [m]", self.glider_height_m)
         row += 1
         self._add_float_row(parent, row, "Angular velocity [rad/s]", self.angular_velocity_rad_s)
@@ -449,6 +487,223 @@ class SceneProfileGui:
         self._add_float_row(parent, row, "Time step [s]", self.time_step_s)
 
         parent.columnconfigure(1, weight=1)
+
+    def _build_render_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=12)
+        row = 0
+
+        header = ttk.Frame(parent)
+        header.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text="Render/performance profile", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Button(header, text="Render option guide", command=self._show_render_help_dialog).grid(row=0, column=1, sticky="e")
+        row += 1
+
+        ttk.Label(parent, text="Render profile").grid(row=row, column=0, sticky="w")
+        profile_box = ttk.Combobox(
+            parent,
+            textvariable=self.render_profile,
+            values=RENDER_PROFILE_NAMES,
+            state="readonly",
+            width=26,
+        )
+        profile_box.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        profile_box.bind("<<ComboboxSelected>>", self._on_render_profile_selected)
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "Use profiles as reproducible presets. Headless can improve throughput because no Isaac UI window is shown. "
+                "Cameras still render because Replicator render products remain active."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        row += 1
+
+        ttk.Checkbutton(parent, text="Headless Isaac run", variable=self.render_headless).grid(row=row, column=0, columnspan=2, sticky="w", pady=(2, 2))
+        row += 1
+        ttk.Checkbutton(parent, text="Hide Isaac UI", variable=self.render_hide_ui).grid(row=row, column=0, columnspan=2, sticky="w", pady=(2, 2))
+        row += 1
+        ttk.Checkbutton(parent, text="Disable viewport updates", variable=self.render_disable_viewport_updates).grid(row=row, column=0, columnspan=2, sticky="w", pady=(2, 8))
+        row += 1
+
+        self._add_int_row(parent, row, "SimulationApp width", self.render_width)
+        row += 1
+        self._add_int_row(parent, row, "SimulationApp height", self.render_height)
+        row += 1
+        self._add_int_row(parent, row, "Anti-aliasing", self.render_anti_aliasing)
+        row += 1
+        self._add_int_row(parent, row, "DLSS mode integer", self.render_dlss_mode)
+        row += 1
+        self._add_int_row(parent, row, "Samples per pixel/frame", self.render_samples_per_pixel)
+        row += 1
+        self._add_int_row(parent, row, "Max bounces", self.render_max_bounces)
+        row += 1
+        ttk.Checkbutton(parent, text="Denoiser", variable=self.render_denoiser).grid(row=row, column=0, columnspan=2, sticky="w", pady=(2, 2))
+        row += 1
+        ttk.Checkbutton(parent, text="Sync loads", variable=self.render_sync_loads).grid(row=row, column=0, columnspan=2, sticky="w", pady=(2, 8))
+        row += 1
+        ttk.Label(parent, text="Renderer string").grid(row=row, column=0, sticky="w")
+        ttk.Entry(parent, textvariable=self.render_renderer, width=36).grid(row=row, column=1, sticky="ew", padx=8, pady=4)
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "The camera RGB dataset resolution is still controlled in the Cameras tab. "
+                "The render width/height here configures the Isaac application/viewport window."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        parent.columnconfigure(1, weight=1)
+
+    def _show_render_help_dialog(self) -> None:
+        """Open a compact render-help dialog without changing any settings."""
+        messagebox.showinfo(
+            "Render option guide",
+            "Render settings quick guide\n\n"
+            "Anti-aliasing\n"
+            "  0 Disabled; 1 TAA; 2 FXAA; 3 DLSS; 4 RTXAA.\n\n"
+            "DLSS mode integer\n"
+            "  0 Performance; 1 Balanced; 2 Quality; 3 Auto. Used when anti-aliasing is DLSS.\n\n"
+            "Samples per pixel/frame\n"
+            "  More samples reduce path-tracing noise but cost time. Common tests: 1, 4, 16, 64, 128.\n\n"
+            "Max bounces\n"
+            "  Number of light bounces used by path tracing. More bounces improve indirect lighting/reflections but slow rendering. Common tests: 1–8.\n\n"
+            "Headless / hide UI / disable viewport updates\n"
+            "  Useful for throughput tests. Disable viewport updates is only useful in headless runs.\n\n"
+            "Camera image resolution\n"
+            "  Still configured in the Cameras tab. SimulationApp width/height controls the app/viewport context."
+        )
+
+    def _build_info_tab(self, parent: ttk.Frame) -> None:
+        """Build static in-GUI documentation for the main tabs and controls."""
+        parent.configure(padding=12)
+        row = 0
+
+        ttk.Label(parent, text="Built-in GUI option guide", font=("Segoe UI", 12, "bold")).grid(
+            row=row, column=0, sticky="w", pady=(0, 8)
+        )
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "This tab documents the main controls. It is intentionally conservative: when Isaac/NVIDIA "
+                "does not define a useful universal maximum, the notes give practical ranges to benchmark rather "
+                "than pretending a hard limit exists."
+            ),
+            wraplength=720,
+            foreground="gray",
+        ).grid(row=row, column=0, sticky="w", pady=(0, 12))
+        row += 1
+
+        row = self._add_info_section(
+            parent,
+            row,
+            "Render tab",
+            [
+                ("Render profile", "Preset bundle for reproducible speed/quality tests. Use debug_fast for quick checks, vision_* for dataset generation, publication_quality only for stills or final examples."),
+                ("Headless Isaac run", "Starts Isaac without the normal visible window. Use this for throughput benchmarks once the scene is visually validated."),
+                ("Hide Isaac UI", "Keeps the app UI hidden when supported. Useful for production runs; keep visible while debugging scene layout."),
+                ("Disable viewport updates", "Avoids updating the interactive viewport. This mainly makes sense with headless runs; sensors/render products can still render."),
+                ("SimulationApp width/height", "Isaac app/viewport context size. This is not the RGB dataset resolution; camera image resolution is in the Cameras tab."),
+                ("Anti-aliasing", "Integer mode: 0 Disabled, 1 TAA, 2 FXAA, 3 DLSS, 4 RTXAA."),
+                ("DLSS mode integer", "Practical NVIDIA convention used here: 0 Performance, 1 Balanced, 2 Quality, 3 Auto. Relevant when anti-aliasing is DLSS."),
+                ("Samples per pixel/frame", "Path-tracing sample count per rendered pixel. Higher reduces noise but increases render time. Practical benchmark values: 1, 4, 16, 64, 128."),
+                ("Max bounces", "Maximum light-bounce depth for path tracing. Higher can improve indirect lighting but slows rendering. Practical benchmark values: 1–8."),
+                ("Denoiser", "Post-processes noisy path-traced frames. Good for visual quality; benchmark both on/off if you care about speed."),
+                ("Sync loads", "Waits for assets to load more deterministically. Keep enabled for reproducible runs unless startup speed is the priority."),
+                ("Renderer string", "Low-level Isaac renderer string. Do not change blindly. Use profile presets first."),
+            ],
+        )
+
+        row = self._add_info_section(
+            parent,
+            row,
+            "Scene tab",
+            [
+                ("Scene name", "Names the profile and output folder. Reusing a name writes into outputs/<scene_name>/ after the delete/keep prompt."),
+                ("Anchor position", "World-frame anchor point for the tether and circular trajectory."),
+                ("Tether length", "Current kinematic horizontal orbit radius unless later changed to a true 3D tether-length model."),
+                ("Glider height", "World Z height used by the current kinematic circular motion."),
+                ("Angular velocity", "Orbit rate in rad/s. Linear speed is approximately radius × angular_velocity."),
+                ("Tether visual radius/color", "Only controls visible tether geometry in the scene. It does not change the kinematic constraint."),
+            ],
+        )
+
+        row = self._add_info_section(
+            parent,
+            row,
+            "Environment tab",
+            [
+                ("plain_debug", "Original simple scene. Use it for fast checks and regression tests."),
+                ("external_usd", "References a local environment asset under assets/environments/<id>/scene.usda."),
+                ("Translation/rotation/scale", "Transforms the whole external environment under /World/Environment. It does not move the glider/cameras."),
+                ("Use project default lights", "Adds the project lights on top of or instead of scene lighting. Disable it when your external scene already has acceptable HDRI/sun lighting."),
+            ],
+        )
+
+        row = self._add_info_section(
+            parent,
+            row,
+            "Glider tab",
+            [
+                ("proxy", "Generated simple glider geometry. Reliable fallback."),
+                ("usd_reference", "References a converted glider USD asset from assets/converted/..."),
+                ("Glider color", "Applied when the asset/material path supports the override or when using the proxy. High contrast is useful for early detection tests."),
+            ],
+        )
+
+        row = self._add_info_section(
+            parent,
+            row,
+            "Cameras tab",
+            [
+                ("Horizontal FOV", "User-facing camera viewing angle. Focal length is derived and saved because Replicator still uses focal_length internally."),
+                ("Resolution", "Actual saved RGB image size. This is the number that matters for computer vision, not DPI."),
+                ("Baseline", "Distance between main and secondary cameras. Larger baselines improve triangulation geometry but can reduce shared field overlap."),
+                ("Frustum display", "Debug geometry only. Keep disabled for clean dataset images because it can contaminate RGB captures."),
+                ("Layout SVG", "Use camera_rig_layout*.svg and the dashboard Camera layout tab for geometric interpretation instead of rendering frustum lines into the camera images."),
+            ],
+        )
+
+        row = self._add_info_section(
+            parent,
+            row,
+            "Capture and performance outputs",
+            [
+                ("RGB images", "Saved in outputs/<scene>/camera_main and camera_secondary."),
+                ("last_frame.png", "Convenience copy of the latest image in each camera folder."),
+                ("frame_state.csv", "Per-frame simulation truth/state information."),
+                ("performance/*.csv/json", "Per-run and per-frame timing; use this for near-real-time assessment."),
+                ("logs/*.jsonl", "Structured logs for simulation and later vision modules."),
+            ],
+        )
+
+        parent.columnconfigure(0, weight=1)
+
+    def _add_info_section(
+        self,
+        parent: ttk.Frame,
+        row: int,
+        title: str,
+        entries: list[tuple[str, str]],
+    ) -> int:
+        frame = ttk.LabelFrame(parent, text=title, padding=10)
+        frame.grid(row=row, column=0, sticky="ew", pady=(0, 10))
+        frame.columnconfigure(1, weight=1)
+        for idx, (name, description) in enumerate(entries):
+            ttk.Label(frame, text=name, font=("Segoe UI", 9, "bold")).grid(
+                row=idx, column=0, sticky="nw", padx=(0, 12), pady=(2, 4)
+            )
+            ttk.Label(frame, text=description, wraplength=560).grid(
+                row=idx, column=1, sticky="w", pady=(2, 4)
+            )
+        return row + 1
 
     def _build_environment_tab(self, parent: ttk.Frame) -> None:
         parent.configure(padding=12)
@@ -1031,6 +1286,93 @@ class SceneProfileGui:
             + (", ".join(self.available_environment_asset_ids) if self.available_environment_asset_ids else "none")
         )
 
+    def _on_render_profile_selected(self, _event: tk.Event | None = None) -> None:
+        profile = self.render_profile.get().strip()
+        presets = {
+            "debug_fast": {
+                "headless": False,
+                "hide_ui": False,
+                "disable_viewport_updates": False,
+                "width": 960,
+                "height": 540,
+                "anti_aliasing": 1,
+                "dlss_mode": 0,
+                "samples_per_pixel_per_frame": 16,
+                "max_bounces": 2,
+                "denoiser": True,
+            },
+            "vision_fast": {
+                "headless": True,
+                "hide_ui": True,
+                "disable_viewport_updates": True,
+                "width": 1280,
+                "height": 720,
+                "anti_aliasing": 2,
+                "dlss_mode": 0,
+                "samples_per_pixel_per_frame": 32,
+                "max_bounces": 3,
+                "denoiser": True,
+            },
+            "vision_balanced": {
+                "headless": False,
+                "hide_ui": False,
+                "disable_viewport_updates": False,
+                "width": 1280,
+                "height": 720,
+                "anti_aliasing": 3,
+                "dlss_mode": 1,
+                "samples_per_pixel_per_frame": 64,
+                "max_bounces": 4,
+                "denoiser": True,
+            },
+            "vision_quality": {
+                "headless": True,
+                "hide_ui": True,
+                "disable_viewport_updates": True,
+                "width": 1920,
+                "height": 1080,
+                "anti_aliasing": 3,
+                "dlss_mode": 2,
+                "samples_per_pixel_per_frame": 128,
+                "max_bounces": 6,
+                "denoiser": True,
+            },
+            "publication_quality": {
+                "headless": True,
+                "hide_ui": True,
+                "disable_viewport_updates": True,
+                "width": 1920,
+                "height": 1080,
+                "anti_aliasing": 4,
+                "dlss_mode": 2,
+                "samples_per_pixel_per_frame": 256,
+                "max_bounces": 8,
+                "denoiser": True,
+            },
+        }
+        if profile not in presets:
+            return
+        preset = presets[profile]
+        self.render_headless.set(bool(preset["headless"]))
+        self.render_hide_ui.set(bool(preset["hide_ui"]))
+        self.render_disable_viewport_updates.set(bool(preset["disable_viewport_updates"]))
+        self.render_width.set(int(preset["width"]))
+        self.render_height.set(int(preset["height"]))
+        self.render_anti_aliasing.set(int(preset["anti_aliasing"]))
+        self.render_dlss_mode.set(int(preset["dlss_mode"]))
+        self.render_samples_per_pixel.set(int(preset["samples_per_pixel_per_frame"]))
+        self.render_max_bounces.set(int(preset["max_bounces"]))
+        self.render_denoiser.set(bool(preset["denoiser"]))
+        self.status_text.set(f"Applied render profile: {profile}")
+
+    def _on_pick_tether_visual_color(self) -> None:
+        color = colorchooser.askcolor(color=self.tether_visual_color_hex.get(), title="Pick tether visual color")
+        if color and color[1]:
+            normalized = self._normalize_hex_color(color[1])
+            self.tether_visual_color_hex.set(normalized)
+            if hasattr(self, "tether_color_preview"):
+                self.tether_color_preview.configure(background=normalized)
+
     def _on_pick_glider_asset_color(self) -> None:
         current_hex = self.glider_asset_color_hex.get().strip() or "#ffd10d"
         selected = colorchooser.askcolor(color=current_hex, title="Pick glider material color")
@@ -1124,6 +1466,9 @@ class SceneProfileGui:
         capture = dict(DEFAULT_CAPTURE)
         capture.update(profile.get("capture", {}))
         environment = normalize_environment(profile.get("environment", DEFAULT_ENVIRONMENT))
+        render = normalize_render(profile.get("render", DEFAULT_RENDER))
+        tether_visual = normalize_tether_visual(profile.get("tether_visual", DEFAULT_TETHER_VISUAL))
+
         glider_asset = dict(DEFAULT_GLIDER_ASSET)
         glider_asset.update(profile.get("glider_asset", {}))
         material_override = dict(DEFAULT_GLIDER_ASSET["material_override"])
@@ -1144,6 +1489,24 @@ class SceneProfileGui:
 
         self.num_frames.set(int(profile["num_frames"]))
         self.time_step_s.set(float(profile["time_step_s"]))
+
+        self.render_profile.set(str(render.get("profile", DEFAULT_RENDER["profile"])))
+        self.render_headless.set(bool(render.get("headless", DEFAULT_RENDER["headless"])))
+        self.render_hide_ui.set(bool(render.get("hide_ui", DEFAULT_RENDER["hide_ui"])))
+        self.render_disable_viewport_updates.set(bool(render.get("disable_viewport_updates", DEFAULT_RENDER["disable_viewport_updates"])))
+        self.render_renderer.set(str(render.get("renderer", DEFAULT_RENDER["renderer"])))
+        self.render_width.set(int(render.get("width", DEFAULT_RENDER["width"])))
+        self.render_height.set(int(render.get("height", DEFAULT_RENDER["height"])))
+        self.render_anti_aliasing.set(int(render.get("anti_aliasing", DEFAULT_RENDER["anti_aliasing"])))
+        self.render_dlss_mode.set(int(render.get("dlss_mode", DEFAULT_RENDER["dlss_mode"])))
+        self.render_samples_per_pixel.set(int(render.get("samples_per_pixel_per_frame", DEFAULT_RENDER["samples_per_pixel_per_frame"])))
+        self.render_max_bounces.set(int(render.get("max_bounces", DEFAULT_RENDER["max_bounces"])))
+        self.render_denoiser.set(bool(render.get("denoiser", DEFAULT_RENDER["denoiser"])))
+        self.render_sync_loads.set(bool(render.get("sync_loads", DEFAULT_RENDER["sync_loads"])))
+
+        self.tether_visual_enabled.set(bool(tether_visual.get("enabled", DEFAULT_TETHER_VISUAL["enabled"])))
+        self.tether_visual_radius_m.set(float(tether_visual.get("radius_m", DEFAULT_TETHER_VISUAL["radius_m"])))
+        self.tether_visual_color_hex.set(self._rgb_float_to_hex(tether_visual.get("diffuse_color", DEFAULT_TETHER_VISUAL["diffuse_color"])))
 
         self.environment_mode.set(str(environment.get("mode", DEFAULT_ENVIRONMENT["mode"])))
         self.environment_asset_id.set(str(environment.get("asset_id", DEFAULT_ENVIRONMENT["asset_id"])))
@@ -1253,6 +1616,28 @@ class SceneProfileGui:
             "angular_velocity_rad_s": float(self.angular_velocity_rad_s.get()),
             "num_frames": int(self.num_frames.get()),
             "time_step_s": float(self.time_step_s.get()),
+            "render": {
+                "profile": self.render_profile.get().strip(),
+                "headless": bool(self.render_headless.get()),
+                "hide_ui": bool(self.render_hide_ui.get()),
+                "disable_viewport_updates": bool(self.render_disable_viewport_updates.get()),
+                "renderer": self.render_renderer.get().strip(),
+                "width": int(self.render_width.get()),
+                "height": int(self.render_height.get()),
+                "anti_aliasing": int(self.render_anti_aliasing.get()),
+                "dlss_mode": int(self.render_dlss_mode.get()),
+                "samples_per_pixel_per_frame": int(self.render_samples_per_pixel.get()),
+                "max_bounces": int(self.render_max_bounces.get()),
+                "denoiser": bool(self.render_denoiser.get()),
+                "sync_loads": bool(self.render_sync_loads.get()),
+            },
+            "tether_visual": {
+                "enabled": bool(self.tether_visual_enabled.get()),
+                "radius_m": float(self.tether_visual_radius_m.get()),
+                "diffuse_color": self._hex_to_rgb_float(self.tether_visual_color_hex.get()),
+                "roughness": 0.5,
+                "metallic": 0.0,
+            },
             "environment": {
                 "mode": self.environment_mode.get().strip(),
                 "asset_id": self.environment_asset_id.get().strip(),

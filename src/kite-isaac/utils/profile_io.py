@@ -30,6 +30,39 @@ ENVIRONMENT_MODES = [
     "external_usd",
 ]
 
+RENDER_PROFILE_NAMES = [
+    "debug_fast",
+    "vision_fast",
+    "vision_balanced",
+    "vision_quality",
+    "publication_quality",
+    "custom",
+]
+
+DEFAULT_RENDER = {
+    "profile": "vision_balanced",
+    "headless": False,
+    "hide_ui": False,
+    "disable_viewport_updates": False,
+    "renderer": "RealTimePathTracing",
+    "width": 1280,
+    "height": 720,
+    "anti_aliasing": 3,
+    "dlss_mode": 1,
+    "samples_per_pixel_per_frame": 64,
+    "max_bounces": 4,
+    "denoiser": True,
+    "sync_loads": True,
+}
+
+DEFAULT_TETHER_VISUAL = {
+    "enabled": True,
+    "radius_m": 0.015,
+    "diffuse_color": [0.02, 0.02, 0.02],
+    "roughness": 0.5,
+    "metallic": 0.0,
+}
+
 DEFAULT_ENVIRONMENT = {
     # plain_debug keeps the original simple ground/backdrop environment.
     # external_usd references assets/environments/<asset_id>/scene.usda or the
@@ -217,6 +250,8 @@ def horizontal_fov_deg_from_focal_length(focal_length_mm: float, horizontal_aper
 
 
 def normalize_profile_schema(profile: dict[str, Any]) -> None:
+    profile["render"] = normalize_render(profile.get("render", {}))
+    profile["tether_visual"] = normalize_tether_visual(profile.get("tether_visual", {}))
     profile["environment"] = normalize_environment(profile.get("environment", {}))
 
     if "camera_rig" in profile and isinstance(profile["camera_rig"], dict):
@@ -226,6 +261,40 @@ def normalize_profile_schema(profile: dict[str, Any]) -> None:
         profile["capture"] = normalize_capture(profile["capture"])
 
     profile["glider_asset"] = normalize_glider_asset(profile.get("glider_asset", {}))
+
+
+def normalize_render(render: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(DEFAULT_RENDER)
+    if isinstance(render, dict):
+        normalized.update(render)
+    normalized["profile"] = str(normalized.get("profile", "vision_balanced"))
+    normalized["headless"] = bool(normalized.get("headless", False))
+    normalized["hide_ui"] = bool(normalized.get("hide_ui", False))
+    normalized["disable_viewport_updates"] = bool(normalized.get("disable_viewport_updates", False))
+    normalized["renderer"] = str(normalized.get("renderer", "RealTimePathTracing"))
+    normalized["width"] = int(normalized.get("width", 1280))
+    normalized["height"] = int(normalized.get("height", 720))
+    normalized["anti_aliasing"] = int(normalized.get("anti_aliasing", 3))
+    normalized["dlss_mode"] = int(normalized.get("dlss_mode", 1))
+    normalized["samples_per_pixel_per_frame"] = int(normalized.get("samples_per_pixel_per_frame", 64))
+    normalized["max_bounces"] = int(normalized.get("max_bounces", 4))
+    normalized["denoiser"] = bool(normalized.get("denoiser", True))
+    normalized["sync_loads"] = bool(normalized.get("sync_loads", True))
+    return normalized
+
+
+def normalize_tether_visual(tether_visual: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(DEFAULT_TETHER_VISUAL)
+    if isinstance(tether_visual, dict):
+        normalized.update(tether_visual)
+    normalized["enabled"] = bool(normalized.get("enabled", True))
+    normalized["radius_m"] = float(normalized.get("radius_m", 0.015))
+    normalized["roughness"] = float(normalized.get("roughness", 0.5))
+    normalized["metallic"] = float(normalized.get("metallic", 0.0))
+    if not isinstance(normalized.get("diffuse_color"), list) or len(normalized["diffuse_color"]) != 3:
+        normalized["diffuse_color"] = copy.deepcopy(DEFAULT_TETHER_VISUAL["diffuse_color"])
+    normalized["diffuse_color"] = [max(0.0, min(1.0, float(v))) for v in normalized["diffuse_color"]]
+    return normalized
 
 
 def normalize_environment(environment: dict[str, Any]) -> dict[str, Any]:
@@ -522,6 +591,12 @@ def validate_tethered_glider_profile(profile: dict[str, Any]) -> None:
         if glider[key] <= 0:
             raise ValueError(f"glider.{key} must be greater than zero.")
 
+    profile["render"] = normalize_render(profile.get("render", {}))
+    validate_render(profile["render"])
+
+    profile["tether_visual"] = normalize_tether_visual(profile.get("tether_visual", {}))
+    validate_tether_visual(profile["tether_visual"])
+
     profile["environment"] = normalize_environment(profile.get("environment", {}))
     validate_environment(profile["environment"])
 
@@ -535,6 +610,38 @@ def validate_tethered_glider_profile(profile: dict[str, Any]) -> None:
 
     profile["glider_asset"] = normalize_glider_asset(profile.get("glider_asset", {}))
     validate_glider_asset(profile["glider_asset"])
+
+
+def validate_render(render: dict[str, Any]) -> None:
+    if not isinstance(render, dict):
+        raise ValueError("render must be a JSON object.")
+    if render.get("profile") not in RENDER_PROFILE_NAMES:
+        raise ValueError("render.profile must be one of: " + ", ".join(RENDER_PROFILE_NAMES))
+    if int(render.get("width", 0)) <= 0 or int(render.get("height", 0)) <= 0:
+        raise ValueError("render.width and render.height must be positive integers.")
+    if int(render.get("anti_aliasing", 0)) < 0:
+        raise ValueError("render.anti_aliasing must be non-negative.")
+    if int(render.get("samples_per_pixel_per_frame", 0)) <= 0:
+        raise ValueError("render.samples_per_pixel_per_frame must be positive.")
+    if int(render.get("max_bounces", 0)) < 0:
+        raise ValueError("render.max_bounces must be non-negative.")
+
+
+def validate_tether_visual(tether_visual: dict[str, Any]) -> None:
+    if not isinstance(tether_visual, dict):
+        raise ValueError("tether_visual must be a JSON object.")
+    if float(tether_visual.get("radius_m", 0.0)) <= 0.0:
+        raise ValueError("tether_visual.radius_m must be greater than zero.")
+    color = tether_visual.get("diffuse_color")
+    if not isinstance(color, list) or len(color) != 3:
+        raise ValueError("tether_visual.diffuse_color must be a 3-element list.")
+    for value in color:
+        if not (0.0 <= float(value) <= 1.0):
+            raise ValueError("tether_visual.diffuse_color entries must be in [0, 1].")
+    if float(tether_visual.get("roughness", 0.0)) < 0.0:
+        raise ValueError("tether_visual.roughness must be non-negative.")
+    if float(tether_visual.get("metallic", 0.0)) < 0.0:
+        raise ValueError("tether_visual.metallic must be non-negative.")
 
 
 def validate_environment(environment: dict[str, Any]) -> None:

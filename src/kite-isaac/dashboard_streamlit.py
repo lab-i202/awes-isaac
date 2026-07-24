@@ -17,12 +17,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import time
+import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -36,6 +38,129 @@ DEFAULT_DATASET_DIR = PROJECT_ROOT / "outputs" / "tethered_glider_basic"
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
 CAMERA_FOLDERS = ["camera_main", "camera_secondary"]
 PLOT_TEMPLATE = "plotly_white"
+
+
+PERFORMANCE_METRIC_DESCRIPTIONS = [
+    {
+        "Metric": "Wall time [s]",
+        "Meaning": "Real elapsed time measured on the PC from run start to run end.",
+        "Use": "Main denominator for FPS and real-time factor.",
+    },
+    {
+        "Metric": "Sim time [s]",
+        "Meaning": "Simulated duration requested by the profile: approximately (num_frames - 1) × time_step_s.",
+        "Use": "This is the time represented by the synthetic trajectory, not the time the PC needed to render it.",
+    },
+    {
+        "Metric": "Real-time factor",
+        "Meaning": "simulated_time_s / wall_time_s.",
+        "Use": "> 1 means faster than real time; = 1 means real time; < 1 means slower than real time.",
+    },
+    {
+        "Metric": "FPS / camera",
+        "Meaning": "frames_timed / wall_time_s for each camera stream.",
+        "Use": "Use this to judge whether each camera stream is close to the target FPS.",
+    },
+    {
+        "Metric": "Images/s total",
+        "Meaning": "expected_images_written / wall_time_s across all cameras.",
+        "Use": "For two cameras, this is roughly 2 × FPS/camera when both are enabled.",
+    },
+]
+
+FRAME_TIMING_DESCRIPTIONS = [
+    {
+        "Column": "frame_index",
+        "Meaning": "Integer simulation/capture frame index.",
+        "Problem signal": "Gaps or duplicates indicate a logging/capture sequencing problem.",
+    },
+    {
+        "Column": "sim_timestamp_s",
+        "Meaning": "Synthetic/simulation timestamp associated with the frame.",
+        "Problem signal": "Non-monotonic values indicate a time-step or logging bug.",
+    },
+    {
+        "Column": "motion_update_ms",
+        "Meaning": "Time spent computing and applying the glider/tether/scene motion update for that frame.",
+        "Problem signal": "Large values mean the kinematic/dynamics update is becoming a bottleneck.",
+    },
+    {
+        "Column": "simulation_update_ms",
+        "Meaning": "Time spent advancing Isaac/Kit after the motion update.",
+        "Problem signal": "Large values usually indicate stage complexity, physics/render synchronization, or viewport overhead.",
+    },
+    {
+        "Column": "capture_step_ms",
+        "Meaning": "Time spent in Replicator/orchestrator capture/render step, including waiting for render completion.",
+        "Problem signal": "Usually the main rendering bottleneck. Sensitive to resolution, samples, ray tracing, lighting, and camera count.",
+    },
+    {
+        "Column": "state_write_ms",
+        "Meaning": "Time spent appending frame_state.csv telemetry for the frame.",
+        "Problem signal": "Should normally be tiny. Large spikes can indicate disk I/O issues.",
+    },
+    {
+        "Column": "last_frame_update_ms",
+        "Meaning": "Time spent updating camera_main/last_frame.png and camera_secondary/last_frame.png from the latest RGB images.",
+        "Problem signal": "Can spike if image files are large, disk is slow, or the copy races with the writer.",
+    },
+    {
+        "Column": "frame_total_ms",
+        "Meaning": "Total measured wall time for the frame loop body.",
+        "Problem signal": "This is the overall per-frame cost. Effective FPS is approximately 1000 / mean(frame_total_ms).",
+    },
+    {
+        "Column": "num_images_expected",
+        "Meaning": "Expected number of camera images written for that frame, usually 2 for stereo.",
+        "Problem signal": "0 means capture/cameras were disabled. Does not prove that files were successfully written; validate outputs separately.",
+    },
+]
+
+MODULE_TIMING_DESCRIPTIONS = [
+    {
+        "Column": "timestamp_utc",
+        "Meaning": "UTC timestamp when a timed module/event finished.",
+    },
+    {
+        "Column": "module",
+        "Meaning": "Logical subsystem being timed, for example capture, dataset_loader, detector, tracker, stereo, metrics.",
+    },
+    {
+        "Column": "event",
+        "Meaning": "Specific operation inside the module, for example load_image, preprocess, detect, triangulate.",
+    },
+    {
+        "Column": "elapsed_ms",
+        "Meaning": "Wall-clock duration of that module event in milliseconds.",
+    },
+    {
+        "Column": "success",
+        "Meaning": "Whether the timed block completed without raising an exception.",
+    },
+    {
+        "Column": "error_message",
+        "Meaning": "Exception summary when success is false.",
+    },
+]
+
+TIMING_INTERPRETATION_GUIDE = """
+The performance plots are diagnostic signals, not proof that the whole system is real-time. Use them to locate bottlenecks.
+
+Rules of thumb:
+- If `capture_step_ms` dominates, the bottleneck is rendering/capture. Try a faster render profile, lower RGB resolution, fewer samples, lower bounces, or headless mode.
+- If `last_frame_update_ms` spikes, the bottleneck is probably file I/O for copying last_frame.png.
+- If `simulation_update_ms` grows, the bottleneck may be scene complexity, viewport updates, or Isaac/Kit synchronization.
+- If `motion_update_ms` grows, the motion/dynamics code is becoming expensive.
+- If `frame_total_ms` trends upward during a run, look for accumulating overhead, memory pressure, or disk pressure.
+
+For a rough effective frame rate, use:
+
+    effective FPS ≈ 1000 / mean(frame_total_ms)
+
+For a two-camera run, total image-write rate is expected to be approximately:
+
+    images/s total ≈ 2 × FPS/camera
+"""
 
 
 def discover_dataset_dirs(outputs_root: Path) -> list[Path]:
@@ -65,6 +190,13 @@ def dataset_label(path: Path) -> str:
     except OSError:
         modified = "unknown time"
     return f"{path.name} — {modified}"
+
+
+def render_definition_table(rows: list[dict[str, str]], title: str | None = None) -> None:
+    """Render a compact definition table in Streamlit."""
+    if title:
+        st.markdown(f"**{title}**")
+    st.table(pd.DataFrame(rows))
 
 
 # -----------------------------------------------------------------------------
@@ -175,6 +307,37 @@ def read_json_if_exists(path: Path) -> dict:
     except Exception as exc:
         st.warning(f"Failed to read JSON: {path}: {exc}")
         return {}
+
+
+def read_jsonl_if_exists(path: Path, max_rows: int = 200) -> pd.DataFrame:
+    if not path.exists() or not path.is_file():
+        return pd.DataFrame()
+    rows = []
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            for line in file:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        return pd.DataFrame()
+    if max_rows and len(rows) > max_rows:
+        rows = rows[-max_rows:]
+    return pd.DataFrame(rows)
+
+
+def read_text_tail(path: Path, max_lines: int = 200) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return "\n".join(lines[-max_lines:])
 
 
 def numeric_columns(df: pd.DataFrame, exclude: Iterable[str] = ()) -> list[str]:
@@ -423,6 +586,219 @@ def export_plot_bundle(
 
 
 # -----------------------------------------------------------------------------
+# Simulation-state export bundle
+# -----------------------------------------------------------------------------
+
+
+def dataframe_preview_records(df: pd.DataFrame, max_rows: int = 5) -> list[dict[str, Any]]:
+    """Return a small JSON-safe preview of a dataframe."""
+    if df.empty:
+        return []
+    try:
+        return json.loads(df.tail(max_rows).to_json(orient="records"))
+    except Exception:
+        return []
+
+
+def add_file_to_zip(
+    zip_file: zipfile.ZipFile,
+    path: Path,
+    arcname: str,
+    inventory: list[dict[str, Any]],
+) -> None:
+    """Add one file to a zip archive and update the inventory."""
+    row: dict[str, Any] = {
+        "archive_path": arcname,
+        "source_path": str(path),
+        "exists": path.exists() and path.is_file(),
+        "size_bytes": None,
+        "modified_local": None,
+        "status": "missing",
+    }
+
+    if not row["exists"]:
+        inventory.append(row)
+        return
+
+    try:
+        stat = path.stat()
+        row["size_bytes"] = int(stat.st_size)
+        row["modified_local"] = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+        zip_file.write(path, arcname=arcname)
+        row["status"] = "included"
+    except Exception as exc:
+        row["status"] = f"error: {exc}"
+
+    inventory.append(row)
+
+
+def add_text_to_zip(
+    zip_file: zipfile.ZipFile,
+    text: str,
+    arcname: str,
+    inventory: list[dict[str, Any]],
+) -> None:
+    encoded = text.encode("utf-8")
+    zip_file.writestr(arcname, encoded)
+    inventory.append(
+        {
+            "archive_path": arcname,
+            "source_path": "generated_by_dashboard",
+            "exists": True,
+            "size_bytes": len(encoded),
+            "modified_local": datetime.now().isoformat(timespec="seconds"),
+            "status": "included",
+        }
+    )
+
+
+def build_simulation_state_export(
+    dataset_dir: Path,
+    project_root: Path,
+    loaded_data: dict[str, Any],
+) -> tuple[str, bytes, dict[str, Any]]:
+    """Build a compact zip bundle describing the selected simulation state.
+
+    This is intentionally a diagnostic/support bundle, not a full dataset export.
+    It includes configuration, logs, performance tables, layout diagnostics,
+    validation data, file inventory, and the latest camera images. It does not
+    include all rgb_*.png frames because that would make the bundle too large to
+    share during debugging.
+    """
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    scene_token = sanitize_filename_token(dataset_dir.name)
+    filename = f"simulation_state_{scene_token}_{timestamp}.zip"
+
+    inventory: list[dict[str, Any]] = []
+    buffer = io.BytesIO()
+
+    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as zip_file:
+        summary = {
+            "export_created_local": datetime.now().isoformat(timespec="seconds"),
+            "project_root": str(project_root),
+            "dataset_dir": str(dataset_dir),
+            "scene_name": dataset_dir.name,
+            "purpose": "Dashboard simulation-state support bundle. Not a full image dataset export.",
+            "contains_full_rgb_sequence": False,
+            "camera_images_policy": "Includes last_frame.png and newest rgb_*.png per camera only.",
+            "dashboard_loaded_counts": {
+                "frame_state_rows": int(len(loaded_data.get("frame_state", pd.DataFrame()))),
+                "capture_manifest_rows": int(len(loaded_data.get("manifest", pd.DataFrame()))),
+                "frame_timing_rows": int(len(loaded_data.get("frame_timing", pd.DataFrame()))),
+                "module_timing_rows": int(len(loaded_data.get("module_timing", pd.DataFrame()))),
+                "events_rows_loaded": int(len(loaded_data.get("events_log", pd.DataFrame()))),
+                "warnings_rows_loaded": int(len(loaded_data.get("warnings_log", pd.DataFrame()))),
+                "errors_rows_loaded": int(len(loaded_data.get("errors_log", pd.DataFrame()))),
+            },
+            "performance_summary": loaded_data.get("performance_summary", {}),
+            "validation_summary": loaded_data.get("validation", {}),
+            "latest_previews": {
+                "frame_state_tail": dataframe_preview_records(loaded_data.get("frame_state", pd.DataFrame())),
+                "frame_timing_tail": dataframe_preview_records(loaded_data.get("frame_timing", pd.DataFrame())),
+                "module_timing_tail": dataframe_preview_records(loaded_data.get("module_timing", pd.DataFrame())),
+            },
+        }
+
+        add_text_to_zip(
+            zip_file,
+            json.dumps(summary, indent=2, ensure_ascii=False),
+            "dashboard_export_summary.json",
+            inventory,
+        )
+
+        # Core run/config files.
+        core_files = [
+            (dataset_dir / "profile_used.json", "run/profile_used.json"),
+            (project_root / "render_profiles.json", "project/render_profiles.json"),
+            (dataset_dir / "frame_state.csv", "run/frame_state.csv"),
+            (dataset_dir / "capture_manifest.csv", "run/capture_manifest.csv"),
+            (dataset_dir / "camera_rig_metadata.json", "run/camera_rig_metadata.json"),
+            (dataset_dir / "validation_report.json", "run/validation_report.json"),
+            (dataset_dir / "camera_rig_layout.json", "run/camera_rig_layout.json"),
+            (dataset_dir / "camera_rig_layout_summary.csv", "run/camera_rig_layout_summary.csv"),
+        ]
+
+        for path, arcname in core_files:
+            add_file_to_zip(zip_file, path, arcname, inventory)
+
+        # Layout SVG diagnostics.
+        for path in sorted(dataset_dir.glob("camera_rig_layout*.svg")):
+            add_file_to_zip(zip_file, path, f"layout/{path.name}", inventory)
+
+        # Logs and performance files.
+        for subdir_name in ["logs", "performance"]:
+            subdir = dataset_dir / subdir_name
+            if subdir.exists():
+                for path in sorted(subdir.iterdir()):
+                    if path.is_file():
+                        add_file_to_zip(zip_file, path, f"{subdir_name}/{path.name}", inventory)
+
+        # Latest camera image diagnostics only. Do not include all rgb frames.
+        for camera_folder in CAMERA_FOLDERS:
+            camera_dir = dataset_dir / camera_folder
+            last_frame = camera_dir / "last_frame.png"
+            latest_rgb = latest_rgb_file(camera_dir)
+            add_file_to_zip(
+                zip_file,
+                last_frame,
+                f"latest_images/{camera_folder}_last_frame.png",
+                inventory,
+            )
+            if latest_rgb is not None:
+                add_file_to_zip(
+                    zip_file,
+                    latest_rgb,
+                    f"latest_images/{camera_folder}_{latest_rgb.name}",
+                    inventory,
+                )
+
+        # Dataset output inventory: useful when files are missing or unexpectedly large.
+        inventory_rows = []
+        if dataset_dir.exists():
+            for path in sorted(dataset_dir.rglob("*")):
+                if not path.is_file():
+                    continue
+                try:
+                    rel = path.relative_to(dataset_dir).as_posix()
+                    stat = path.stat()
+                    inventory_rows.append(
+                        {
+                            "relative_path": rel,
+                            "size_bytes": int(stat.st_size),
+                            "modified_local": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                        }
+                    )
+                except OSError:
+                    continue
+
+        inventory_df = pd.DataFrame(inventory_rows)
+        add_text_to_zip(
+            zip_file,
+            inventory_df.to_csv(index=False),
+            "dataset_file_inventory.csv",
+            inventory,
+        )
+
+        # Archive inventory itself. This is written last so it includes generated files too.
+        add_text_to_zip(
+            zip_file,
+            json.dumps(inventory, indent=2, ensure_ascii=False),
+            "archive_inventory.json",
+            inventory,
+        )
+
+    data = buffer.getvalue()
+    export_info = {
+        "filename": filename,
+        "size_bytes": len(data),
+        "included_items": sum(1 for row in inventory if row.get("status") == "included"),
+        "missing_items": sum(1 for row in inventory if row.get("status") == "missing"),
+    }
+    return filename, data, export_info
+
+
+# -----------------------------------------------------------------------------
 # Sidebar
 # -----------------------------------------------------------------------------
 
@@ -557,11 +933,27 @@ layout_elevation_svg_path = dataset_dir / "camera_rig_layout_elevation.svg"
 layout_nearfield_svg_path = dataset_dir / "camera_rig_layout_nearfield.svg"
 layout_json_path = dataset_dir / "camera_rig_layout.json"
 layout_summary_path = dataset_dir / "camera_rig_layout_summary.csv"
+logs_dir = dataset_dir / "logs"
+run_log_path = logs_dir / "run.log"
+events_jsonl_path = logs_dir / "events.jsonl"
+warnings_jsonl_path = logs_dir / "warnings.jsonl"
+errors_jsonl_path = logs_dir / "errors.jsonl"
+performance_dir = dataset_dir / "performance"
+frame_timing_path = performance_dir / "frame_timing.csv"
+module_timing_path = performance_dir / "module_timing.csv"
+performance_summary_path = performance_dir / "run_performance_summary.json"
+profile_used_path = dataset_dir / "profile_used.json"
 
 frame_state = coerce_numeric_columns(read_csv_if_exists(frame_state_path))
 manifest = read_csv_if_exists(manifest_path)
 metadata = read_json_if_exists(metadata_path)
 validation = read_json_if_exists(validation_path)
+performance_summary = read_json_if_exists(performance_summary_path)
+frame_timing = coerce_numeric_columns(read_csv_if_exists(frame_timing_path))
+module_timing = coerce_numeric_columns(read_csv_if_exists(module_timing_path))
+events_log = read_jsonl_if_exists(events_jsonl_path, max_rows=tail_rows if 'tail_rows' in globals() else 200)
+warnings_log = read_jsonl_if_exists(warnings_jsonl_path, max_rows=tail_rows if 'tail_rows' in globals() else 200)
+errors_log = read_jsonl_if_exists(errors_jsonl_path, max_rows=tail_rows if 'tail_rows' in globals() else 200)
 
 if not dataset_dir.exists():
     st.error(f"Dataset folder does not exist yet: {dataset_dir}")
@@ -573,12 +965,14 @@ if not dataset_dir.exists():
 # -----------------------------------------------------------------------------
 
 
-status_cols = st.columns(5)
+status_cols = st.columns(7)
 status_cols[0].metric("Dataset exists", "yes" if dataset_dir.exists() else "no")
 status_cols[1].metric("Frame rows", len(frame_state))
 status_cols[2].metric("Manifest rows", len(manifest))
 status_cols[3].metric("Validation", str(validation.get("ok", "missing")))
-status_cols[4].metric("Auto-refresh", "on" if auto_refresh and not paused else "off")
+status_cols[4].metric("RT factor", f"{float(performance_summary.get('real_time_factor', 0.0)):.2f}" if performance_summary.get("real_time_factor") is not None else "missing")
+status_cols[5].metric("FPS/camera", f"{float(performance_summary.get('capture_fps_per_camera', 0.0)):.1f}" if performance_summary.get("capture_fps_per_camera") is not None else "missing")
+status_cols[6].metric("Auto-refresh", "on" if auto_refresh and not paused else "off")
 
 st.caption(f"Dataset: `{dataset_dir}`")
 
@@ -594,8 +988,8 @@ if not frame_state.empty:
 # -----------------------------------------------------------------------------
 
 
-tab_live, tab_layout, tab_data, tab_plots, tab_files = st.tabs(
-    ["Live cameras", "Camera layout", "Telemetry rows", "Plots", "Files"]
+tab_live, tab_layout, tab_data, tab_plots, tab_perf, tab_logs, tab_files = st.tabs(
+    ["Live cameras", "Camera layout", "Telemetry rows", "Plots", "Performance", "Logs", "Files"]
 )
 
 with tab_live:
@@ -841,11 +1235,187 @@ with tab_plots:
                     f"Error: {exc}"
                 )
 
+with tab_perf:
+    st.subheader("Run performance")
+    with st.expander("What do these run-level metrics mean?", expanded=False):
+        render_definition_table(PERFORMANCE_METRIC_DESCRIPTIONS)
+        st.markdown(TIMING_INTERPRETATION_GUIDE)
+
+    if performance_summary:
+        perf_cols = st.columns(5)
+        perf_cols[0].metric(
+            "Wall time [s]",
+            f"{float(performance_summary.get('wall_time_s', 0.0)):.2f}",
+            help="Real elapsed time on the PC from run start to run end.",
+        )
+        perf_cols[1].metric(
+            "Sim time [s]",
+            f"{float(performance_summary.get('simulated_time_s', 0.0)):.2f}",
+            help="Synthetic duration represented by the trajectory: approximately (num_frames - 1) × time_step_s.",
+        )
+        perf_cols[2].metric(
+            "Real-time factor",
+            f"{float(performance_summary.get('real_time_factor', 0.0)):.3f}",
+            help="simulated_time_s / wall_time_s. Greater than 1 means faster than real time.",
+        )
+        perf_cols[3].metric(
+            "FPS / camera",
+            f"{float(performance_summary.get('capture_fps_per_camera', 0.0)):.2f}",
+            help="frames_timed / wall_time_s for each camera stream.",
+        )
+        perf_cols[4].metric(
+            "Images/s total",
+            f"{float(performance_summary.get('capture_fps_total_image_rate', 0.0)):.2f}",
+            help="expected_images_written / wall_time_s across all cameras.",
+        )
+        with st.expander("run_performance_summary.json", expanded=False):
+            st.json(performance_summary)
+    else:
+        st.warning(f"No performance summary found at `{performance_summary_path}`")
+
+    st.subheader("Frame timing")
+    with st.expander("What does each frame timing signal mean?", expanded=False):
+        render_definition_table(FRAME_TIMING_DESCRIPTIONS)
+        st.markdown(
+            "The plotted values are wall-clock durations in milliseconds. "
+            "They are not simulated time. Spikes are expected occasionally, but repeated spikes indicate a bottleneck."
+        )
+
+    if frame_timing.empty:
+        st.info(f"No frame timing CSV found at `{frame_timing_path}`")
+    else:
+        st.dataframe(frame_timing.tail(tail_rows), use_container_width=True, hide_index=True)
+        timing_numeric = numeric_columns(frame_timing, exclude=["frame_index"])
+        default_timing = [c for c in ["frame_total_ms", "motion_update_ms", "simulation_update_ms", "capture_step_ms", "state_write_ms", "last_frame_update_ms"] if c in timing_numeric]
+        selected_timing = st.multiselect(
+            "Timing signals [ms]",
+            options=timing_numeric,
+            default=default_timing,
+            help="Select which per-frame timing columns to plot. Definitions are in the expander above.",
+        )
+        if selected_timing:
+            timing_df = frame_timing.tail(plot_window_rows)
+            timing_fig = make_time_series_figure(timing_df, selected_timing, x_column="frame_index")
+            timing_fig.update_layout(
+                title="Frame timing [ms]",
+                xaxis_title="Frame index",
+                yaxis_title="Wall-clock duration [ms]",
+                legend_title="Timing signal",
+            )
+            st.plotly_chart(timing_fig, use_container_width=True, config={"displaylogo": False})
+            st.caption(
+                "For rough throughput, use effective FPS ≈ 1000 / mean(frame_total_ms). "
+                "A method intended for 30 FPS should normally stay below about 33 ms/frame, including image loading and processing."
+            )
+
+    st.subheader("Module timing")
+    with st.expander("What will module timing mean for the vision algorithms?", expanded=False):
+        render_definition_table(MODULE_TIMING_DESCRIPTIONS)
+        st.markdown(
+            "The simulator currently writes module timing only for explicitly timed blocks. "
+            "The same file format should be used later by the vision package: image loading, preprocessing, detection, tracking, stereo matching, triangulation, and metrics."
+        )
+
+    if module_timing.empty:
+        st.info(f"No module timing CSV found at `{module_timing_path}` yet. Vision modules can write to this same format later.")
+    else:
+        st.dataframe(module_timing.tail(tail_rows), use_container_width=True, hide_index=True)
+
+with tab_logs:
+    st.subheader("Run logs")
+    log_text = read_text_tail(run_log_path, max_lines=tail_rows)
+    if log_text:
+        st.code(log_text)
+    else:
+        st.info(f"No run.log found at `{run_log_path}`")
+
+    st.subheader("Structured events")
+    if events_log.empty:
+        st.info(f"No events found at `{events_jsonl_path}`")
+    else:
+        st.dataframe(events_log.tail(tail_rows), use_container_width=True, hide_index=True)
+
+    col_w, col_e = st.columns(2)
+    with col_w:
+        st.markdown("#### Warnings")
+        if warnings_log.empty:
+            st.success("No warnings logged.")
+        else:
+            st.dataframe(warnings_log.tail(tail_rows), use_container_width=True, hide_index=True)
+    with col_e:
+        st.markdown("#### Errors")
+        if errors_log.empty:
+            st.success("No errors logged.")
+        else:
+            st.dataframe(errors_log.tail(tail_rows), use_container_width=True, hide_index=True)
+
 with tab_files:
+    st.subheader("Simulation state export")
+    st.caption(
+        "Creates a compact ZIP with profile_used.json, logs, performance tables, layout diagnostics, "
+        "validation files, file inventory, and latest camera images. It intentionally does not include all RGB frames."
+    )
+
+    export_loaded_data = {
+        "frame_state": frame_state,
+        "manifest": manifest,
+        "frame_timing": frame_timing,
+        "module_timing": module_timing,
+        "events_log": events_log,
+        "warnings_log": warnings_log,
+        "errors_log": errors_log,
+        "performance_summary": performance_summary,
+        "validation": validation,
+    }
+
+    try:
+        export_filename, export_zip_bytes, export_info = build_simulation_state_export(
+            dataset_dir=dataset_dir,
+            project_root=PROJECT_ROOT,
+            loaded_data=export_loaded_data,
+        )
+        export_cols = st.columns([1, 3])
+        with export_cols[0]:
+            st.download_button(
+                "Download simulation state ZIP",
+                data=export_zip_bytes,
+                file_name=export_filename,
+                mime="application/zip",
+                help="Use this when you need to share the simulation state/debug information without sending the full RGB dataset.",
+            )
+        with export_cols[1]:
+            st.caption(
+                f"Bundle size: {export_info['size_bytes'] / 1024:.1f} KiB | "
+                f"included items: {export_info['included_items']} | missing expected items: {export_info['missing_items']}"
+            )
+    except Exception as exc:
+        st.error(f"Could not build simulation state export bundle: {exc}")
+
+    st.divider()
     st.subheader("Dataset files")
 
     file_rows = []
-    for path in [frame_state_path, manifest_path, metadata_path, layout_svg_path, layout_nearfield_svg_path, layout_json_path, layout_summary_path, validation_path]:
+    for path in [
+        frame_state_path,
+        manifest_path,
+        metadata_path,
+        layout_svg_path,
+        layout_plan_roi_svg_path,
+        layout_plan_full_svg_path,
+        layout_elevation_svg_path,
+        layout_nearfield_svg_path,
+        layout_json_path,
+        layout_summary_path,
+        validation_path,
+        profile_used_path,
+        run_log_path,
+        events_jsonl_path,
+        warnings_jsonl_path,
+        errors_jsonl_path,
+        frame_timing_path,
+        module_timing_path,
+        performance_summary_path,
+    ]:
         file_rows.append(
             {
                 "file": path.name,

@@ -8,13 +8,39 @@
   "tether_length_m": 6.0,
   "glider_height_m": 1.5,
   "angular_velocity_rad_s": 2.4,
-  "num_frames": 1200,
+  "num_frames": 300,
   "time_step_s": 0.016666666666666666,
+  "render": {
+    "profile": "vision_fast",
+    "headless": true,
+    "hide_ui": true,
+    "disable_viewport_updates": true,
+    "renderer": "RaytracedLighting",
+    "width": 1280,
+    "height": 720,
+    "anti_aliasing": 3,
+    "dlss_mode": 0,
+    "samples_per_pixel_per_frame": 1,
+    "max_bounces": 1,
+    "denoiser": true,
+    "sync_loads": true
+  },
+  "tether_visual": {
+    "enabled": true,
+    "radius_m": 0.015,
+    "diffuse_color": [
+      0.0196078431372549,
+      0.0196078431372549,
+      0.0196078431372549
+    ],
+    "roughness": 0.5,
+    "metallic": 0.0
+  },
   "environment": {
     "mode": "external_usd",
     "asset_id": "flatland_trees_cloudy_01",
     "translation_m": [
-      -10.0,
+      -10.1,
       -100.0,
       0.0
     ],
@@ -81,13 +107,13 @@
         0.5019607843137255
       ],
       "position": [
-        -2.5,
+        -2.6,
         15.9,
         0.9
       ],
       "rotation_deg": [
         22.2,
-        -90.0,
+        -90.1,
         -0.1
       ]
     },
@@ -104,9 +130,9 @@
         0.5019607843137255
       ],
       "position_offset": [
-        6.0,
+        5.9,
         0.0,
-        0.0
+        -0.1
       ],
       "rotation_offset_deg": [
         -0.3,

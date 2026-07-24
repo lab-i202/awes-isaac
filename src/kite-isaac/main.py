@@ -16,21 +16,45 @@
 from pathlib import Path
 
 from gui.scene_profile_gui import run_scene_profile_gui
-from utils.profile_io import validate_tethered_glider_profile
+from utils.profile_io import normalize_render, validate_tethered_glider_profile
 
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 DEFAULT_PROFILE_PATH = PROJECT_ROOT / "profiles" / "tethered_glider_basic.json"
 
 
-ISAAC_SIM_CONFIG = {
+DEFAULT_ISAAC_SIM_CONFIG = {
     "headless": False,
+    "hide_ui": False,
     "renderer": "RealTimePathTracing",
     "width": 1280,
     "height": 720,
     "anti_aliasing": 3,
     "sync_loads": True,
 }
+
+
+def build_simulation_app_config(scene_config: dict) -> dict:
+    """Build SimulationApp config from profile.render.
+
+    Camera image resolution is still controlled by camera_rig.resolution.  The
+    render.width/render.height values configure the Isaac application window or
+    headless render context.
+    """
+    render = normalize_render(scene_config.get("render", {}))
+    config = dict(DEFAULT_ISAAC_SIM_CONFIG)
+    config.update(
+        {
+            "headless": bool(render.get("headless", False)),
+            "hide_ui": bool(render.get("hide_ui", False)),
+            "renderer": str(render.get("renderer", "RealTimePathTracing")),
+            "width": int(render.get("width", 1280)),
+            "height": int(render.get("height", 720)),
+            "anti_aliasing": int(render.get("anti_aliasing", 3)),
+            "sync_loads": bool(render.get("sync_loads", True)),
+        }
+    )
+    return config
 
 
 def main() -> int:
@@ -67,7 +91,10 @@ def main() -> int:
 
     from isaacsim import SimulationApp
 
-    simulation_app = SimulationApp(ISAAC_SIM_CONFIG)
+    isaac_sim_config = build_simulation_app_config(scene_config)
+    print("Render profile:", scene_config.get("render", {}).get("profile", "vision_balanced"))
+    print("SimulationApp config:", isaac_sim_config)
+    simulation_app = SimulationApp(isaac_sim_config)
 
     try:
         from scenario.tethered_glider_scene import run_tethered_glider_scene
