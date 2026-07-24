@@ -1,175 +1,118 @@
-# kite_isaac_dashboard_state_export_v24
+# kite_isaac_v25_annotations_info_hotfix
 
-This patch adds a **simulation-state export button** to the Streamlit dashboard.
+## Purpose
 
-The goal is to make it easy to share the state of a simulation run for debugging without sending the full RGB image sequence.
+This is a small hotfix on top of `kite_isaac_glider_ground_truth_annotations_v25.zip`.
 
----
+It fixes a real usability omission: v25 added an `Annotations` tab but did not add a matching help/info button or document the new options in the global `Info` tab.
+
+From this point onward, every new GUI/dashboard tab or non-trivial option should include an explanatory help box or Info-tab section. This is not cosmetic. It avoids invalid datasets caused by wrong settings.
 
 ## Files to replace
 
 Replace only:
 
 ```text
-dashboard_streamlit.py
+gui/scene_profile_gui.py
 README_PATCH.md
 ```
 
-No Isaac Sim scene code is changed by this patch.
+Do not replace `scenario/tethered_glider_scene.py`, `dashboard_streamlit.py`, or `utils/profile_io.py` from this ZIP because they are unchanged from v25.
 
----
+## What changed
 
-## What this patch adds
+### 1. New button in the Annotations tab
 
-In the dashboard `Files` tab, there is now a new section:
-
-```text
-Simulation state export
-```
-
-with a button:
+The `Annotations` tab now has:
 
 ```text
-Download simulation state ZIP
+Annotations option guide
 ```
 
-The ZIP contains the relevant diagnostic/configuration files needed to inspect or share a run state.
-
----
-
-## What the export ZIP includes
-
-The generated ZIP includes:
+This opens a compact explanation dialog for:
 
 ```text
-dashboard_export_summary.json
-archive_inventory.json
-dataset_file_inventory.csv
-
-run/profile_used.json
-run/frame_state.csv
-run/capture_manifest.csv
-run/camera_rig_metadata.json
-run/validation_report.json
-run/camera_rig_layout.json
-run/camera_rig_layout_summary.csv
-
-layout/camera_rig_layout*.svg
-
-logs/run.log
-logs/events.jsonl
-logs/warnings.jsonl
-logs/errors.jsonl
-
-performance/frame_timing.csv
-performance/module_timing.csv
-performance/run_performance_summary.json
-
-latest_images/camera_main_last_frame.png
-latest_images/camera_main_<latest rgb>.png
-latest_images/camera_secondary_last_frame.png
-latest_images/camera_secondary_<latest rgb>.png
-
-project/render_profiles.json
+Enable annotation output
+Apply semantic label to /World/Glider
+Semantic segmentation
+Instance segmentation
+Binary glider mask requested
+2D tight bounding boxes
+2D loose bounding boxes
+3D bounding boxes
+Distance to camera
+Distance to image plane
+Debug overlays requested
+Keep raw Replicator annotation files
 ```
 
-The exact content depends on which files exist for the selected output scene.
+### 2. Global Info tab updated
 
----
-
-## What it intentionally does not include
-
-It does **not** include every RGB frame:
+The `Info` tab now includes a full `Annotations tab` section explaining:
 
 ```text
-camera_main/rgb_*.png
-camera_secondary/rgb_*.png
+Goal of annotations
+Semantic labels
+Semantic segmentation
+Instance segmentation
+Binary masks
+2D tight/loose bounding boxes
+3D bounding boxes
+Depth/distance outputs
+Debug overlays
+Raw Replicator files
 ```
 
-Reason: that would make the support ZIP unnecessarily huge.
+### 3. No behavior changes
 
-Instead, it includes:
+This hotfix changes only GUI documentation/help.
+
+It does not change:
 
 ```text
-last_frame.png
-latest rgb_*.png
+simulation logic
+annotation capture logic
+Replicator setup
+output folders
+camera model export
+frame labels export
+dashboard behavior
 ```
 
-for each camera.
+## How to apply
 
-This is enough to diagnose most scene, camera, render, timing, logging, and dashboard-state problems.
-
----
-
-## Generated summary file
-
-The ZIP includes:
+From the ZIP, copy:
 
 ```text
-dashboard_export_summary.json
+gui/scene_profile_gui.py
 ```
 
-This records:
+into:
 
 ```text
-export timestamp
-project root
-dataset directory
-scene name
-whether full RGB sequence is included
-row counts loaded by dashboard
-performance summary
-validation summary
-recent frame_state preview
-recent frame_timing preview
-recent module_timing preview
+C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac\gui\scene_profile_gui.py
 ```
 
----
+Then run:
 
-## Generated inventories
+```powershell
+cd C:\Users\Admin\Documents\Github\awes-isaac\src\kite-isaac
+C:\Users\Admin\anaconda3\envs\env_isaaclab\python.exe main.py
+```
 
-The ZIP includes two inventories:
+Open the GUI and check:
 
 ```text
-archive_inventory.json
+Annotations tab -> Annotations option guide button exists
+Info tab -> Annotations tab section exists
 ```
 
-This lists what was attempted for inclusion, whether it existed, and whether it was included.
+## Validation performed here
+
+Python syntax check passed:
 
 ```text
-dataset_file_inventory.csv
+python -m py_compile gui/scene_profile_gui.py
 ```
 
-This lists all files found inside the selected dataset output folder, including relative path, size, and modification time.
-
-This is useful when debugging missing/oversized/unexpected files.
-
----
-
-## How to use
-
-1. Run a simulation.
-2. Open the dashboard.
-3. Select the output scene in the sidebar.
-4. Go to the `Files` tab.
-5. Click `Download simulation state ZIP`.
-6. Share that ZIP when debugging the run state.
-
----
-
-## Notes
-
-This patch does not change:
-
-```text
-render settings
-capture logic
-Isaac Sim execution
-telemetry logging
-performance logging
-camera layout generation
-```
-
-It only adds a dashboard-side export bundle.
-
+Isaac Sim was not run in this environment.

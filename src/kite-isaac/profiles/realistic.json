@@ -153,6 +153,21 @@
       720
     ]
   },
+  "annotations": {
+    "enabled": true,
+    "label_glider": true,
+    "glider_class_name": "kite",
+    "semantic_segmentation": true,
+    "instance_segmentation": false,
+    "binary_glider_mask": true,
+    "bounding_box_2d_tight": true,
+    "bounding_box_2d_loose": true,
+    "bounding_box_3d": true,
+    "distance_to_camera": false,
+    "distance_to_image_plane": false,
+    "debug_overlays": false,
+    "raw_replicator_output": true
+  },
   "capture": {
     "enabled": true,
     "output_root": "outputs",

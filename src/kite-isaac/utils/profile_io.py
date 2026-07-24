@@ -132,6 +132,25 @@ DEFAULT_CAPTURE = {
 }
 
 
+DEFAULT_ANNOTATIONS = {
+    # This block controls dataset ground-truth outputs.  The first target is
+    # robust glider-centered annotation for single-camera detection/tracking.
+    "enabled": True,
+    "label_glider": True,
+    "glider_class_name": "glider",
+    "semantic_segmentation": True,
+    "instance_segmentation": False,
+    "binary_glider_mask": True,
+    "bounding_box_2d_tight": True,
+    "bounding_box_2d_loose": True,
+    "bounding_box_3d": True,
+    "distance_to_camera": False,
+    "distance_to_image_plane": False,
+    "debug_overlays": False,
+    "raw_replicator_output": True,
+}
+
+
 DEFAULT_GLIDER_ASSET = {
     # proxy: use the procedural box-based glider.
     # usd_reference: reference a converted USD asset from assets/asset_registry.json.
@@ -253,6 +272,7 @@ def normalize_profile_schema(profile: dict[str, Any]) -> None:
     profile["render"] = normalize_render(profile.get("render", {}))
     profile["tether_visual"] = normalize_tether_visual(profile.get("tether_visual", {}))
     profile["environment"] = normalize_environment(profile.get("environment", {}))
+    profile["annotations"] = normalize_annotations(profile.get("annotations", {}))
 
     if "camera_rig" in profile and isinstance(profile["camera_rig"], dict):
         profile["camera_rig"] = normalize_camera_rig(profile["camera_rig"])
@@ -321,6 +341,34 @@ def normalize_capture(capture: dict[str, Any]) -> dict[str, Any]:
     legacy_capture.pop("timestamp_filenames", None)
 
     normalized.update(legacy_capture)
+    return normalized
+
+
+def normalize_annotations(annotations: dict[str, Any]) -> dict[str, Any]:
+    normalized = copy.deepcopy(DEFAULT_ANNOTATIONS)
+    if isinstance(annotations, dict):
+        normalized.update(annotations)
+
+    for key in [
+        "enabled",
+        "label_glider",
+        "semantic_segmentation",
+        "instance_segmentation",
+        "binary_glider_mask",
+        "bounding_box_2d_tight",
+        "bounding_box_2d_loose",
+        "bounding_box_3d",
+        "distance_to_camera",
+        "distance_to_image_plane",
+        "debug_overlays",
+        "raw_replicator_output",
+    ]:
+        normalized[key] = bool(normalized.get(key, DEFAULT_ANNOTATIONS[key]))
+
+    class_name = str(normalized.get("glider_class_name", "glider")).strip().lower()
+    class_name = re.sub(r"[^a-z0-9_\-]+", "_", class_name)
+    class_name = class_name.strip("_") or "glider"
+    normalized["glider_class_name"] = class_name
     return normalized
 
 
@@ -600,6 +648,9 @@ def validate_tethered_glider_profile(profile: dict[str, Any]) -> None:
     profile["environment"] = normalize_environment(profile.get("environment", {}))
     validate_environment(profile["environment"])
 
+    profile["annotations"] = normalize_annotations(profile.get("annotations", {}))
+    validate_annotations(profile["annotations"])
+
     if "camera_rig" in profile:
         profile["camera_rig"] = normalize_camera_rig(profile["camera_rig"])
         validate_camera_rig(profile["camera_rig"])
@@ -680,6 +731,30 @@ def validate_environment(environment: dict[str, Any]) -> None:
 
     if not isinstance(environment["fallback_to_plain_debug"], bool):
         raise ValueError("environment.fallback_to_plain_debug must be true or false.")
+
+
+def validate_annotations(annotations: dict[str, Any]) -> None:
+    if not isinstance(annotations, dict):
+        raise ValueError("annotations must be a JSON object.")
+    if not str(annotations.get("glider_class_name", "")).strip():
+        raise ValueError("annotations.glider_class_name cannot be empty.")
+    bool_keys = [
+        "enabled",
+        "label_glider",
+        "semantic_segmentation",
+        "instance_segmentation",
+        "binary_glider_mask",
+        "bounding_box_2d_tight",
+        "bounding_box_2d_loose",
+        "bounding_box_3d",
+        "distance_to_camera",
+        "distance_to_image_plane",
+        "debug_overlays",
+        "raw_replicator_output",
+    ]
+    for key in bool_keys:
+        if not isinstance(annotations.get(key), bool):
+            raise ValueError(f"annotations.{key} must be true or false.")
 
 
 def validate_camera_rig(camera_rig: dict[str, Any]) -> None:

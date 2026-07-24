@@ -25,9 +25,11 @@ from utils.profile_io import (
     DEFAULT_ENVIRONMENT,
     DEFAULT_RENDER,
     DEFAULT_TETHER_VISUAL,
+    DEFAULT_ANNOTATIONS,
     ENVIRONMENT_MODES,
     RENDER_PROFILE_NAMES,
     GLIDER_ASSET_MODES,
+    normalize_annotations,
     normalize_environment,
     normalize_render,
     normalize_tether_visual,
@@ -325,6 +327,20 @@ class SceneProfileGui:
         self.capture_rename_after_capture = tk.BooleanVar()
         self.capture_rt_subframes = tk.IntVar()
 
+        self.annotations_enabled = tk.BooleanVar()
+        self.annotations_label_glider = tk.BooleanVar()
+        self.annotations_glider_class_name = tk.StringVar()
+        self.annotations_semantic_segmentation = tk.BooleanVar()
+        self.annotations_instance_segmentation = tk.BooleanVar()
+        self.annotations_binary_glider_mask = tk.BooleanVar()
+        self.annotations_bbox_2d_tight = tk.BooleanVar()
+        self.annotations_bbox_2d_loose = tk.BooleanVar()
+        self.annotations_bbox_3d = tk.BooleanVar()
+        self.annotations_distance_to_camera = tk.BooleanVar()
+        self.annotations_distance_to_image_plane = tk.BooleanVar()
+        self.annotations_debug_overlays = tk.BooleanVar()
+        self.annotations_raw_replicator_output = tk.BooleanVar()
+
         self.status_text = tk.StringVar()
 
     def _build_layout(self) -> None:
@@ -384,6 +400,7 @@ class SceneProfileGui:
         environment_scroll = ScrollableFrame(notebook)
         glider_scroll = ScrollableFrame(notebook)
         camera_scroll = ScrollableFrame(notebook)
+        annotations_scroll = ScrollableFrame(notebook)
         capture_scroll = ScrollableFrame(notebook)
         info_scroll = ScrollableFrame(notebook)
 
@@ -392,6 +409,7 @@ class SceneProfileGui:
         notebook.add(environment_scroll, text="Environment")
         notebook.add(glider_scroll, text="Glider")
         notebook.add(camera_scroll, text="Cameras")
+        notebook.add(annotations_scroll, text="Annotations")
         notebook.add(capture_scroll, text="Capture")
         notebook.add(info_scroll, text="Info")
 
@@ -400,6 +418,7 @@ class SceneProfileGui:
         self._build_environment_tab(environment_scroll.content)
         self._build_glider_tab(glider_scroll.content)
         self._build_camera_tab(camera_scroll.content)
+        self._build_annotations_tab(annotations_scroll.content)
         self._build_capture_tab(capture_scroll.content)
         self._build_info_tab(info_scroll.content)
 
@@ -579,6 +598,35 @@ class SceneProfileGui:
             "  Still configured in the Cameras tab. SimulationApp width/height controls the app/viewport context."
         )
 
+    def _show_annotations_help_dialog(self) -> None:
+        """Open a compact annotations-help dialog without changing any settings."""
+        messagebox.showinfo(
+            "Annotations option guide",
+            "Annotations settings quick guide\n\n"
+            "Purpose\n"
+            "  These controls generate glider-centered ground truth for detection, tracking, segmentation, and later stereo/state-estimation experiments.\n\n"
+            "Enable annotation output\n"
+            "  Master switch. If disabled, camera_model.json/frame_labels.csv may still be produced by the simulation, but Replicator raw annotation outputs are not requested.\n\n"
+            "Apply semantic label to /World/Glider\n"
+            "  Required for semantic masks and Replicator object boxes to identify the glider. Keep enabled unless debugging semantic-label issues.\n\n"
+            "Semantic segmentation\n"
+            "  Per-pixel class labels. This is the key output for algorithms based on masks, thresholding validation, contours, active contours/snakes, and segmentation metrics.\n\n"
+            "Instance segmentation\n"
+            "  Per-pixel object-instance labels. Useful when there are multiple gliders or multiple objects of the same class. Optional for the current single-glider setup.\n\n"
+            "Binary glider mask requested\n"
+            "  Desired clean 0/255 mask where glider pixels are foreground. In v25 the raw semantic files are inventoried first; final conversion depends on the exact Isaac/Replicator output format observed after a run.\n\n"
+            "2D tight / loose bounding boxes\n"
+            "  Tight boxes follow visible object pixels more closely. Loose boxes may include the projected extent. Use tight boxes for detector IoU and center-error metrics.\n\n"
+            "3D bounding boxes\n"
+            "  Object extent in 3D/world or camera-related coordinates, depending on Replicator output. Useful later for pose/stereo validation, not needed for simple 2D detection.\n\n"
+            "Distance to camera / image plane\n"
+            "  Depth-style outputs. Enable later for stereo/depth validation. They increase output size and complexity, so leave off during first 2D detection tests.\n\n"
+            "Debug overlays\n"
+            "  Human-readable visual checks. Do not use overlays as ground truth. They are for inspection only and should not contaminate RGB training/evaluation frames.\n\n"
+            "Keep raw Replicator annotation files\n"
+            "  Keep enabled until the raw output format is confirmed. These files are needed to build robust binary-mask and label conversion code."
+        )
+
     def _build_info_tab(self, parent: ttk.Frame) -> None:
         """Build static in-GUI documentation for the main tabs and controls."""
         parent.configure(padding=12)
@@ -668,6 +716,26 @@ class SceneProfileGui:
                 ("Baseline", "Distance between main and secondary cameras. Larger baselines improve triangulation geometry but can reduce shared field overlap."),
                 ("Frustum display", "Debug geometry only. Keep disabled for clean dataset images because it can contaminate RGB captures."),
                 ("Layout SVG", "Use camera_rig_layout*.svg and the dashboard Camera layout tab for geometric interpretation instead of rendering frustum lines into the camera images."),
+            ],
+        )
+
+        row = self._add_info_section(
+            parent,
+            row,
+            "Annotations tab",
+            [
+                ("Goal", "Produces glider-centered ground truth for computer-vision experiments: semantic masks, object boxes, optional depth-style outputs, and index files."),
+                ("Enable annotation output", "Master switch for Replicator annotation capture. Keep enabled when building datasets for detection/tracking/segmentation."),
+                ("Apply semantic label to /World/Glider", "Required so Replicator can identify the glider as class 'glider'. Keep enabled for normal dataset runs."),
+                ("Semantic segmentation", "Per-pixel class ground truth. Use this to evaluate mask-based algorithms, snakes/active contours, thresholding, segmentation IoU, Dice score, and foreground/background errors."),
+                ("Instance segmentation", "Per-pixel object-instance identity. Optional for one glider; useful later if several gliders or several same-class objects exist."),
+                ("Binary glider mask requested", "Requests a clean foreground/background glider mask. v25 inventories raw semantic files first; final converter will be locked after seeing your Isaac output format."),
+                ("2D tight bounding boxes", "Main detector label for single-stage detectors. Use for bbox IoU, center error, visible-frame detection rate, and false positives/frame."),
+                ("2D loose bounding boxes", "Useful secondary box label. It can be more conservative than tight boxes, depending on annotator output."),
+                ("3D bounding boxes", "3D object extent/pose-related ground truth for later stereo/state-estimation validation. Not necessary for first 2D detection tests."),
+                ("Distance outputs", "Depth-style labels. Enable later for stereo/depth checks; keep disabled initially to avoid large/complex outputs."),
+                ("Debug overlays", "Inspection images only. Do not train/evaluate from overlays; use raw RGB plus separate annotation files."),
+                ("Raw Replicator files", "Keep these until we confirm file names, encodings, and semantic-ID mapping for your Isaac version."),
             ],
         )
 
@@ -1107,6 +1175,62 @@ class SceneProfileGui:
 
         parent.columnconfigure(1, weight=1)
 
+    def _build_annotations_tab(self, parent: ttk.Frame) -> None:
+        parent.configure(padding=12)
+        row = 0
+
+        header = ttk.Frame(parent)
+        header.grid(row=row, column=0, columnspan=2, sticky="ew", pady=(0, 6))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text="Glider-centered ground-truth annotations", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w")
+        ttk.Button(header, text="Annotations option guide", command=self._show_annotations_help_dialog).grid(row=0, column=1, sticky="e")
+        row += 1
+        ttk.Label(
+            parent,
+            text=(
+                "These options create dataset outputs for vision experiments. "
+                "Raw Replicator annotations are stored under annotations/<camera>/replicator_raw. "
+                "frame_labels.csv remains a lightweight per-frame index and projected-label summary."
+            ),
+            wraplength=760,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        row += 1
+
+        checks = [
+            ("Enable annotation output", self.annotations_enabled),
+            ("Apply semantic label to /World/Glider", self.annotations_label_glider),
+            ("Semantic segmentation", self.annotations_semantic_segmentation),
+            ("Instance segmentation", self.annotations_instance_segmentation),
+            ("Binary glider mask requested", self.annotations_binary_glider_mask),
+            ("2D tight bounding boxes", self.annotations_bbox_2d_tight),
+            ("2D loose bounding boxes", self.annotations_bbox_2d_loose),
+            ("3D bounding boxes", self.annotations_bbox_3d),
+            ("Distance to camera", self.annotations_distance_to_camera),
+            ("Distance to image plane", self.annotations_distance_to_image_plane),
+            ("Debug overlays requested", self.annotations_debug_overlays),
+            ("Keep raw Replicator annotation files", self.annotations_raw_replicator_output),
+        ]
+        for label, variable in checks:
+            ttk.Checkbutton(parent, text=label, variable=variable).grid(row=row, column=0, columnspan=2, sticky="w", pady=2)
+            row += 1
+
+        ttk.Label(parent, text="Glider semantic class name").grid(row=row, column=0, sticky="w", pady=(8, 4))
+        ttk.Entry(parent, textvariable=self.annotations_glider_class_name, width=24).grid(row=row, column=1, sticky="w", padx=8, pady=(8, 4))
+        row += 1
+
+        ttk.Label(
+            parent,
+            text=(
+                "Note: binary mask conversion depends on the raw semantic-mask format produced by your Isaac/Replicator version. "
+                "This patch writes the request and inventories raw files; conversion can be finalized after one run confirms the raw format."
+            ),
+            wraplength=760,
+            foreground="gray",
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(10, 0))
+
+        parent.columnconfigure(1, weight=1)
+
     def _build_capture_tab(self, parent: ttk.Frame) -> None:
         parent.configure(padding=12)
         row = 0
@@ -1468,6 +1592,7 @@ class SceneProfileGui:
         environment = normalize_environment(profile.get("environment", DEFAULT_ENVIRONMENT))
         render = normalize_render(profile.get("render", DEFAULT_RENDER))
         tether_visual = normalize_tether_visual(profile.get("tether_visual", DEFAULT_TETHER_VISUAL))
+        annotations = normalize_annotations(profile.get("annotations", DEFAULT_ANNOTATIONS))
 
         glider_asset = dict(DEFAULT_GLIDER_ASSET)
         glider_asset.update(profile.get("glider_asset", {}))
@@ -1605,6 +1730,20 @@ class SceneProfileGui:
         self.capture_rename_after_capture.set(bool(capture.get("rename_after_capture", False)))
         self.capture_rt_subframes.set(int(capture.get("rt_subframes", 1)))
 
+        self.annotations_enabled.set(bool(annotations.get("enabled", DEFAULT_ANNOTATIONS["enabled"])))
+        self.annotations_label_glider.set(bool(annotations.get("label_glider", DEFAULT_ANNOTATIONS["label_glider"])))
+        self.annotations_glider_class_name.set(str(annotations.get("glider_class_name", DEFAULT_ANNOTATIONS["glider_class_name"])))
+        self.annotations_semantic_segmentation.set(bool(annotations.get("semantic_segmentation", DEFAULT_ANNOTATIONS["semantic_segmentation"])))
+        self.annotations_instance_segmentation.set(bool(annotations.get("instance_segmentation", DEFAULT_ANNOTATIONS["instance_segmentation"])))
+        self.annotations_binary_glider_mask.set(bool(annotations.get("binary_glider_mask", DEFAULT_ANNOTATIONS["binary_glider_mask"])))
+        self.annotations_bbox_2d_tight.set(bool(annotations.get("bounding_box_2d_tight", DEFAULT_ANNOTATIONS["bounding_box_2d_tight"])))
+        self.annotations_bbox_2d_loose.set(bool(annotations.get("bounding_box_2d_loose", DEFAULT_ANNOTATIONS["bounding_box_2d_loose"])))
+        self.annotations_bbox_3d.set(bool(annotations.get("bounding_box_3d", DEFAULT_ANNOTATIONS["bounding_box_3d"])))
+        self.annotations_distance_to_camera.set(bool(annotations.get("distance_to_camera", DEFAULT_ANNOTATIONS["distance_to_camera"])))
+        self.annotations_distance_to_image_plane.set(bool(annotations.get("distance_to_image_plane", DEFAULT_ANNOTATIONS["distance_to_image_plane"])))
+        self.annotations_debug_overlays.set(bool(annotations.get("debug_overlays", DEFAULT_ANNOTATIONS["debug_overlays"])))
+        self.annotations_raw_replicator_output.set(bool(annotations.get("raw_replicator_output", DEFAULT_ANNOTATIONS["raw_replicator_output"])))
+
         self.status_text.set(f"Loaded: {self.current_profile_path}")
 
     def _collect_profile_from_gui(self) -> dict[str, Any]:
@@ -1737,6 +1876,21 @@ class SceneProfileGui:
                     int(self.camera_resolution_width.get()),
                     int(self.camera_resolution_height.get()),
                 ],
+            },
+            "annotations": {
+                "enabled": bool(self.annotations_enabled.get()),
+                "label_glider": bool(self.annotations_label_glider.get()),
+                "glider_class_name": self.annotations_glider_class_name.get().strip(),
+                "semantic_segmentation": bool(self.annotations_semantic_segmentation.get()),
+                "instance_segmentation": bool(self.annotations_instance_segmentation.get()),
+                "binary_glider_mask": bool(self.annotations_binary_glider_mask.get()),
+                "bounding_box_2d_tight": bool(self.annotations_bbox_2d_tight.get()),
+                "bounding_box_2d_loose": bool(self.annotations_bbox_2d_loose.get()),
+                "bounding_box_3d": bool(self.annotations_bbox_3d.get()),
+                "distance_to_camera": bool(self.annotations_distance_to_camera.get()),
+                "distance_to_image_plane": bool(self.annotations_distance_to_image_plane.get()),
+                "debug_overlays": bool(self.annotations_debug_overlays.get()),
+                "raw_replicator_output": bool(self.annotations_raw_replicator_output.get()),
             },
             "capture": {
                 "enabled": bool(self.capture_enabled.get()),

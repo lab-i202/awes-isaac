@@ -943,12 +943,23 @@ frame_timing_path = performance_dir / "frame_timing.csv"
 module_timing_path = performance_dir / "module_timing.csv"
 performance_summary_path = performance_dir / "run_performance_summary.json"
 profile_used_path = dataset_dir / "profile_used.json"
+camera_model_path = dataset_dir / "camera_model.json"
+dataset_manifest_path = dataset_dir / "dataset_manifest.json"
+labels_dir = dataset_dir / "labels"
+frame_labels_path = labels_dir / "frame_labels.csv"
+semantic_id_map_path = labels_dir / "semantic_id_map.json"
+annotation_inventory_path = labels_dir / "annotation_inventory.csv"
 
 frame_state = coerce_numeric_columns(read_csv_if_exists(frame_state_path))
 manifest = read_csv_if_exists(manifest_path)
 metadata = read_json_if_exists(metadata_path)
 validation = read_json_if_exists(validation_path)
 performance_summary = read_json_if_exists(performance_summary_path)
+camera_model = read_json_if_exists(camera_model_path)
+dataset_manifest_json = read_json_if_exists(dataset_manifest_path)
+frame_labels = coerce_numeric_columns(read_csv_if_exists(frame_labels_path))
+annotation_inventory = coerce_numeric_columns(read_csv_if_exists(annotation_inventory_path))
+semantic_id_map = read_json_if_exists(semantic_id_map_path)
 frame_timing = coerce_numeric_columns(read_csv_if_exists(frame_timing_path))
 module_timing = coerce_numeric_columns(read_csv_if_exists(module_timing_path))
 events_log = read_jsonl_if_exists(events_jsonl_path, max_rows=tail_rows if 'tail_rows' in globals() else 200)
@@ -965,14 +976,15 @@ if not dataset_dir.exists():
 # -----------------------------------------------------------------------------
 
 
-status_cols = st.columns(7)
+status_cols = st.columns(8)
 status_cols[0].metric("Dataset exists", "yes" if dataset_dir.exists() else "no")
 status_cols[1].metric("Frame rows", len(frame_state))
 status_cols[2].metric("Manifest rows", len(manifest))
-status_cols[3].metric("Validation", str(validation.get("ok", "missing")))
-status_cols[4].metric("RT factor", f"{float(performance_summary.get('real_time_factor', 0.0)):.2f}" if performance_summary.get("real_time_factor") is not None else "missing")
-status_cols[5].metric("FPS/camera", f"{float(performance_summary.get('capture_fps_per_camera', 0.0)):.1f}" if performance_summary.get("capture_fps_per_camera") is not None else "missing")
-status_cols[6].metric("Auto-refresh", "on" if auto_refresh and not paused else "off")
+status_cols[3].metric("Label rows", len(frame_labels))
+status_cols[4].metric("Validation", str(validation.get("ok", "missing")))
+status_cols[5].metric("RT factor", f"{float(performance_summary.get('real_time_factor', 0.0)):.2f}" if performance_summary.get("real_time_factor") is not None else "missing")
+status_cols[6].metric("FPS/camera", f"{float(performance_summary.get('capture_fps_per_camera', 0.0)):.1f}" if performance_summary.get("capture_fps_per_camera") is not None else "missing")
+status_cols[7].metric("Auto-refresh", "on" if auto_refresh and not paused else "off")
 
 st.caption(f"Dataset: `{dataset_dir}`")
 
@@ -988,8 +1000,8 @@ if not frame_state.empty:
 # -----------------------------------------------------------------------------
 
 
-tab_live, tab_layout, tab_data, tab_plots, tab_perf, tab_logs, tab_files = st.tabs(
-    ["Live cameras", "Camera layout", "Telemetry rows", "Plots", "Performance", "Logs", "Files"]
+tab_live, tab_layout, tab_truth, tab_data, tab_plots, tab_perf, tab_logs, tab_files = st.tabs(
+    ["Live cameras", "Camera layout", "Ground truth", "Telemetry rows", "Plots", "Performance", "Logs", "Files"]
 )
 
 with tab_live:
@@ -1102,6 +1114,49 @@ with tab_layout:
             st.json(layout_json)
         else:
             st.info(f"No layout JSON found at `{layout_json_path}`")
+
+with tab_truth:
+    st.subheader("Ground-truth package")
+    st.caption(
+        "This tab summarizes glider-centered dataset outputs: camera_model.json, frame_labels.csv, "
+        "semantic ID metadata, and raw Replicator annotation inventory."
+    )
+
+    cols = st.columns(4)
+    cols[0].metric("camera_model.json", "yes" if camera_model else "missing")
+    cols[1].metric("frame_labels rows", len(frame_labels))
+    cols[2].metric("annotation files", len(annotation_inventory))
+    cols[3].metric("dataset_manifest", "yes" if dataset_manifest_json else "missing")
+
+    if not frame_labels.empty:
+        st.markdown("#### Recent frame_labels.csv rows")
+        st.dataframe(frame_labels.tail(tail_rows), use_container_width=True, hide_index=True)
+    else:
+        st.warning(f"No frame_labels.csv loaded from `{frame_labels_path}`. Run a new capture with v25 annotations enabled.")
+
+    if not annotation_inventory.empty:
+        st.markdown("#### Annotation inventory")
+        st.dataframe(annotation_inventory.tail(tail_rows), use_container_width=True, hide_index=True)
+    else:
+        st.info(f"No raw annotation files inventoried at `{annotation_inventory_path}` yet.")
+
+    with st.expander("camera_model.json", expanded=False):
+        if camera_model:
+            st.json(camera_model)
+        else:
+            st.info(f"No camera_model.json found at `{camera_model_path}`")
+
+    with st.expander("semantic_id_map.json", expanded=False):
+        if semantic_id_map:
+            st.json(semantic_id_map)
+        else:
+            st.info(f"No semantic_id_map.json found at `{semantic_id_map_path}`")
+
+    with st.expander("dataset_manifest.json", expanded=False):
+        if dataset_manifest_json:
+            st.json(dataset_manifest_json)
+        else:
+            st.info(f"No dataset_manifest.json found at `{dataset_manifest_path}`")
 
 with tab_data:
     st.subheader("Recent frame_state.csv rows")

@@ -31,7 +31,7 @@ from utils.asset_io import (
     get_environment_scene_path,
     load_asset_registry,
 )
-from utils.profile_io import normalize_camera_rig, normalize_environment, normalize_render, normalize_tether_visual, sanitize_filename
+from utils.profile_io import normalize_annotations, normalize_camera_rig, normalize_environment, normalize_render, normalize_tether_visual, sanitize_filename
 from utils.run_logger import PerformanceRecorder, RunLogger, make_run_id
 
 
@@ -98,6 +98,11 @@ def run_tethered_glider_scene(
     create_tether_curve(stage, scene_config)
     create_glider_visual(stage, scene_config)
 
+    annotations_cfg = normalize_annotations(scene_config.get("annotations", {}))
+    scene_config["annotations"] = annotations_cfg
+    if bool(annotations_cfg.get("enabled", True)) and bool(annotations_cfg.get("label_glider", True)):
+        apply_glider_semantics(stage, class_name=str(annotations_cfg.get("glider_class_name", "glider")))
+
     capture_cfg = scene_config.get("capture", {})
     camera_rig_cfg = normalize_camera_rig(scene_config.get("camera_rig", {}))
 
@@ -148,6 +153,7 @@ def run_tethered_glider_scene(
     print(f"Render profile: {render_cfg.get('profile')}")
     print(f"Headless: {render_cfg.get('headless')}; disable viewport updates: {render_cfg.get('disable_viewport_updates')}")
     print(f"Tether visual: {scene_config['tether_visual']}")
+    print(f"Annotations: {scene_config.get('annotations', {})}")
 
     if camera_enabled:
         print(f"Camera orientation mode: {camera_rig_cfg['orientation_mode']}")
@@ -296,6 +302,12 @@ def run_tethered_glider_scene(
                     camera_rig_cfg=camera_rig_cfg,
                     camera_defs=camera_defs,
                 )
+                write_camera_model_json(
+                    output_dir=output_dir,
+                    scene_config=scene_config,
+                    camera_rig_cfg=camera_rig_cfg,
+                    camera_defs=camera_defs,
+                )
 
                 if bool(capture_cfg.get("rename_after_capture", False)):
                     timestamp_saved_rgb_images(
@@ -322,6 +334,24 @@ def run_tethered_glider_scene(
                     scene_config=scene_config,
                     num_frames=num_frames,
                     time_step_s=time_step_s,
+                )
+                write_frame_labels_csv(
+                    output_dir=output_dir,
+                    scene_config=scene_config,
+                    camera_rig_cfg=camera_rig_cfg,
+                    camera_defs=camera_defs,
+                    num_frames=num_frames,
+                    time_step_s=time_step_s,
+                )
+                write_annotation_inventory(output_dir=output_dir)
+                write_dataset_manifest_json(
+                    output_dir=output_dir,
+                    scene_config=scene_config,
+                    camera_rig_cfg=camera_rig_cfg,
+                    camera_defs=camera_defs,
+                    num_frames=num_frames,
+                    time_step_s=time_step_s,
+                    run_id=run_id,
                 )
                 write_last_frame_images(output_dir=output_dir)
 
@@ -465,6 +495,39 @@ def create_two_camera_capture(
     )
     writer_secondary.attach([render_product_secondary])
 
+    writers = [writer_main, writer_secondary]
+
+    annotations_cfg = normalize_annotations(scene_config.get("annotations", {}))
+    if bool(annotations_cfg.get("enabled", True)) and bool(annotations_cfg.get("raw_replicator_output", True)):
+        annotator_kwargs = build_replicator_annotation_writer_kwargs(annotations_cfg)
+        if annotator_kwargs:
+            annotation_root = output_dir / "annotations"
+            (annotation_root / "camera_main" / "replicator_raw").mkdir(parents=True, exist_ok=True)
+            (annotation_root / "camera_secondary" / "replicator_raw").mkdir(parents=True, exist_ok=True)
+            try:
+                annotation_writer_main = rep.WriterRegistry.get("BasicWriter")
+                annotation_writer_main.initialize(
+                    output_dir=f"{scene_dir_name}/annotations/camera_main/replicator_raw",
+                    rgb=False,
+                    **annotator_kwargs,
+                )
+                annotation_writer_main.attach([render_product_main])
+                writers.append(annotation_writer_main)
+
+                annotation_writer_secondary = rep.WriterRegistry.get("BasicWriter")
+                annotation_writer_secondary.initialize(
+                    output_dir=f"{scene_dir_name}/annotations/camera_secondary/replicator_raw",
+                    rgb=False,
+                    **annotator_kwargs,
+                )
+                annotation_writer_secondary.attach([render_product_secondary])
+                writers.append(annotation_writer_secondary)
+
+                write_semantic_id_map(output_dir, annotations_cfg)
+            except Exception as exc:
+                print(f"[warning] Replicator annotation writer setup failed; RGB capture will continue. Reason: {exc}")
+                write_semantic_id_map(output_dir, annotations_cfg)
+
     print("=" * 100)
     print("Two-camera RGB capture")
     print("=" * 100)
@@ -481,9 +544,11 @@ def create_two_camera_capture(
     print(f"output directory: {output_dir.resolve()}")
     print(f"main camera output: {(output_dir / 'camera_main').resolve()}")
     print(f"secondary camera output: {(output_dir / 'camera_secondary').resolve()}")
+    if bool(scene_config.get("annotations", {}).get("enabled", True)):
+        print(f"annotation output: {(output_dir / 'annotations').resolve()}")
     print("=" * 100)
 
-    return [render_product_main, render_product_secondary], [writer_main, writer_secondary], output_dir
+    return [render_product_main, render_product_secondary], writers, output_dir
 
 
 def cleanup_capture(render_products: list[Any], writers: list[Any]) -> None:
@@ -498,6 +563,415 @@ def cleanup_capture(render_products: list[Any], writers: list[Any]) -> None:
             render_product.destroy()
         except Exception as exc:
             print(f"[warning] render_product.destroy failed: {exc}")
+
+
+
+# -----------------------------------------------------------------------------
+# Glider-centered annotations, camera model, and dataset labels
+# -----------------------------------------------------------------------------
+
+
+def build_replicator_annotation_writer_kwargs(annotations_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Return BasicWriter keyword arguments for enabled annotation channels.
+
+    This uses Replicator/BasicWriter names where available. Unknown channels are
+    deliberately not added. Raw outputs are inventoried after the run because
+    exact file names vary across Isaac/Replicator versions.
+    """
+
+    cfg = normalize_annotations(annotations_cfg)
+    kwargs: dict[str, Any] = {}
+
+    if bool(cfg.get("semantic_segmentation", False)):
+        kwargs["semantic_segmentation"] = True
+        kwargs["colorize_semantic_segmentation"] = False
+
+    if bool(cfg.get("instance_segmentation", False)):
+        kwargs["instance_segmentation"] = True
+        kwargs["colorize_instance_segmentation"] = False
+
+    if bool(cfg.get("bounding_box_2d_tight", False)):
+        kwargs["bounding_box_2d_tight"] = True
+
+    if bool(cfg.get("bounding_box_2d_loose", False)):
+        kwargs["bounding_box_2d_loose"] = True
+
+    if bool(cfg.get("bounding_box_3d", False)):
+        kwargs["bounding_box_3d"] = True
+
+    if bool(cfg.get("distance_to_camera", False)):
+        kwargs["distance_to_camera"] = True
+
+    if bool(cfg.get("distance_to_image_plane", False)):
+        kwargs["distance_to_image_plane"] = True
+
+    return kwargs
+
+
+def apply_glider_semantics(stage: Usd.Stage, class_name: str = "glider") -> None:
+    """Apply semantic class metadata to /World/Glider and all descendants.
+
+    Replicator semantic/bbox annotators need semantic labels.  We label the
+    glider root and child prims so both proxy and referenced USD gliders are
+    discoverable by the annotators.
+    """
+
+    root = stage.GetPrimAtPath("/World/Glider")
+    if not root or not root.IsValid():
+        print("[warning] could not apply glider semantics: /World/Glider not found")
+        return
+
+    class_name = str(class_name).strip() or "glider"
+
+    try:
+        from pxr import Semantics  # type: ignore
+    except Exception as exc:
+        print(f"[warning] pxr.Semantics import failed; semantic labels may be unavailable: {exc}")
+        Semantics = None  # type: ignore
+
+    labeled_count = 0
+    for prim in Usd.PrimRange(root):
+        if not prim or not prim.IsValid():
+            continue
+        try:
+            if Semantics is not None:
+                api = Semantics.SemanticsAPI.Apply(prim, "Semantics")
+                api.CreateSemanticTypeAttr().Set("class")
+                api.CreateSemanticDataAttr().Set(class_name)
+            # Also write explicit custom attributes as a harmless fallback and
+            # for easier inspection in USDA/debug dumps.
+            prim.CreateAttribute("upwind:semantic_class", Sdf.ValueTypeNames.String, custom=True).Set(class_name)
+            prim.CreateAttribute("upwind:is_target", Sdf.ValueTypeNames.Bool, custom=True).Set(True)
+            labeled_count += 1
+        except Exception as exc:
+            print(f"[warning] failed to label semantic prim {prim.GetPath()}: {exc}")
+
+    print(f"Applied semantic class '{class_name}' to {labeled_count} glider prim(s).")
+
+
+def write_semantic_id_map(output_dir: Path, annotations_cfg: dict[str, Any]) -> None:
+    labels_dir = output_dir / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    class_name = str(annotations_cfg.get("glider_class_name", "glider"))
+    mapping = {
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "schema": "upwind_semantic_id_map_v1",
+        "notes": [
+            "Replicator may encode semantic IDs differently by version.",
+            "The glider class name is stable and should be resolved through Replicator metadata when parsing raw masks.",
+            "binary_glider_mask conversion is intentionally deferred until raw Replicator mask format is validated on this Isaac Sim version.",
+        ],
+        "classes": [
+            {"class_name": class_name, "semantic_type": "class", "target_prim": "/World/Glider"},
+            {"class_name": "background", "semantic_type": "implicit", "target_prim": "everything_not_glider"},
+        ],
+    }
+    (labels_dir / "semantic_id_map.json").write_text(json.dumps(mapping, indent=2), encoding="utf-8")
+
+
+def camera_basis_from_definition(camera_rig_cfg: dict[str, Any], camera_def: dict[str, Any]) -> dict[str, list[float]]:
+    origin = [float(v) for v in camera_def["position"]]
+    if str(camera_rig_cfg.get("orientation_mode", "parallel_manual")) == "look_at_target":
+        target = [float(v) for v in camera_rig_cfg.get("look_at", [0.0, 0.0, 1.5])]
+    else:
+        target = [float(v) for v in camera_def.get("parallel_look_at", [origin[0] + 1.0, origin[1], origin[2]])]
+
+    forward = normalize_vec3([target[0] - origin[0], target[1] - origin[1], target[2] - origin[2]])
+    world_up = [0.0, 0.0, 1.0]
+    right = normalize_vec3(cross_vec3(forward, world_up))
+    if abs(right[0]) + abs(right[1]) + abs(right[2]) < 1e-9:
+        right = [1.0, 0.0, 0.0]
+    up = normalize_vec3(cross_vec3(right, forward))
+    return {"origin": origin, "target": target, "forward": forward, "right": right, "up": up}
+
+
+def camera_intrinsics_from_rig(camera_rig_cfg: dict[str, Any]) -> dict[str, Any]:
+    resolution = camera_rig_cfg.get("resolution", [1280, 720])
+    width = int(resolution[0])
+    height = int(resolution[1])
+    hfov_deg = float(camera_rig_cfg.get("horizontal_fov_deg", 33.332))
+    aspect = width / max(float(height), 1.0)
+    vfov_deg = math.degrees(2.0 * math.atan(math.tan(math.radians(hfov_deg) / 2.0) / max(aspect, 1e-9)))
+    fx = width / (2.0 * math.tan(math.radians(hfov_deg) / 2.0))
+    fy = height / (2.0 * math.tan(math.radians(vfov_deg) / 2.0))
+    cx = (width - 1.0) / 2.0
+    cy = (height - 1.0) / 2.0
+    return {
+        "width_px": width,
+        "height_px": height,
+        "horizontal_fov_deg": hfov_deg,
+        "vertical_fov_deg": vfov_deg,
+        "focal_length_mm": float(camera_rig_cfg.get("focal_length", 0.0)),
+        "horizontal_aperture_mm": float(camera_rig_cfg.get("horizontal_aperture_mm", 20.955)),
+        "fx_px": fx,
+        "fy_px": fy,
+        "cx_px": cx,
+        "cy_px": cy,
+        "K": [[fx, 0.0, cx], [0.0, fy, cy], [0.0, 0.0, 1.0]],
+        "distortion_model": "pinhole_no_distortion",
+        "distortion_coefficients": [0.0, 0.0, 0.0, 0.0, 0.0],
+    }
+
+
+def write_camera_model_json(
+    output_dir: Path,
+    scene_config: dict[str, Any],
+    camera_rig_cfg: dict[str, Any],
+    camera_defs: list[dict[str, Any]],
+) -> None:
+    intr = camera_intrinsics_from_rig(camera_rig_cfg)
+    cameras: dict[str, Any] = {}
+    for camera_def in camera_defs:
+        basis = camera_basis_from_definition(camera_rig_cfg, camera_def)
+        origin = basis["origin"]
+        right = basis["right"]
+        up = basis["up"]
+        forward = basis["forward"]
+        # World-to-camera convention used by this dataset metadata:
+        # x_cam=right dot (Pw-C), y_cam=up dot (Pw-C), z_cam=forward dot (Pw-C).
+        rotation_world_to_camera = [right, up, forward]
+        translation_world_to_camera = [-sum(rotation_world_to_camera[row][i] * origin[i] for i in range(3)) for row in range(3)]
+        cameras[camera_def["name"]] = {
+            "name": camera_def["name"],
+            "position_world_m": origin,
+            "target_world_m": basis["target"],
+            "forward_unit_world": forward,
+            "right_unit_world": right,
+            "up_unit_world": up,
+            "intrinsics": intr,
+            "extrinsics": {
+                "rotation_world_to_camera": rotation_world_to_camera,
+                "translation_world_to_camera_m": translation_world_to_camera,
+                "world_to_camera_3x4": [
+                    rotation_world_to_camera[0] + [translation_world_to_camera[0]],
+                    rotation_world_to_camera[1] + [translation_world_to_camera[1]],
+                    rotation_world_to_camera[2] + [translation_world_to_camera[2]],
+                ],
+                "camera_to_world_basis_columns": {
+                    "right": right,
+                    "up": up,
+                    "forward": forward,
+                },
+            },
+        }
+
+    baseline = [0.0, 0.0, 0.0]
+    baseline_distance = 0.0
+    if len(camera_defs) >= 2:
+        p0 = [float(v) for v in camera_defs[0]["position"]]
+        p1 = [float(v) for v in camera_defs[1]["position"]]
+        baseline = [p1[i] - p0[i] for i in range(3)]
+        baseline_distance = math.sqrt(sum(v * v for v in baseline))
+
+    model = {
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "schema": "upwind_camera_model_v1",
+        "scene_name": scene_config.get("scene_name", ""),
+        "camera_model_note": "Virtual camera parameters exported from the configured Isaac/Replicator cameras; no chessboard calibration is performed.",
+        "stereo": {"baseline_vector_m": baseline, "baseline_distance_m": baseline_distance},
+        "cameras": cameras,
+    }
+    (output_dir / "camera_model.json").write_text(json.dumps(model, indent=2), encoding="utf-8")
+
+
+def project_world_point_to_pixel(point_world: list[float], camera_rig_cfg: dict[str, Any], camera_def: dict[str, Any]) -> dict[str, Any]:
+    intr = camera_intrinsics_from_rig(camera_rig_cfg)
+    basis = camera_basis_from_definition(camera_rig_cfg, camera_def)
+    rel = [float(point_world[i]) - basis["origin"][i] for i in range(3)]
+    depth = sum(rel[i] * basis["forward"][i] for i in range(3))
+    x_cam = sum(rel[i] * basis["right"][i] for i in range(3))
+    y_cam = sum(rel[i] * basis["up"][i] for i in range(3))
+    if depth <= 1e-9:
+        return {"visible": False, "u_px": None, "v_px": None, "depth_m": depth, "reason": "behind_camera"}
+    u = intr["cx_px"] + intr["fx_px"] * (x_cam / depth)
+    v = intr["cy_px"] - intr["fy_px"] * (y_cam / depth)
+    visible = 0.0 <= u < intr["width_px"] and 0.0 <= v < intr["height_px"]
+    return {"visible": bool(visible), "u_px": u, "v_px": v, "depth_m": depth, "reason": "inside_image" if visible else "outside_image"}
+
+
+def approximate_glider_bbox_corners(scene_config: dict[str, Any], sim_time_s: float) -> list[list[float]]:
+    center = compute_glider_position(scene_config, sim_time_s)
+    glider_cfg = scene_config.get("glider", {})
+    length = float(glider_cfg.get("length_m", 0.95))
+    wingspan = float(glider_cfg.get("wingspan_m", 1.5))
+    height = max(float(glider_cfg.get("body_height_m", 0.1)), float(glider_cfg.get("wing_thickness_m", 0.025)), 0.08)
+    theta = float(scene_config.get("angular_velocity_rad_s", 0.0)) * sim_time_s
+    yaw = math.degrees(math.atan2(math.cos(theta), -math.sin(theta)))
+    yaw_rad = math.radians(yaw)
+    fwd = [math.cos(yaw_rad), math.sin(yaw_rad), 0.0]
+    right = [-math.sin(yaw_rad), math.cos(yaw_rad), 0.0]
+    up = [0.0, 0.0, 1.0]
+    corners: list[list[float]] = []
+    for sx in [-0.5, 0.5]:
+        for sy in [-0.5, 0.5]:
+            for sz in [-0.5, 0.5]:
+                corners.append([
+                    center[i]
+                    + sx * length * fwd[i]
+                    + sy * wingspan * right[i]
+                    + sz * height * up[i]
+                    for i in range(3)
+                ])
+    return corners
+
+
+def projected_bbox_for_camera(scene_config: dict[str, Any], camera_rig_cfg: dict[str, Any], camera_def: dict[str, Any], frame_index: int, sim_time_s: float) -> dict[str, Any]:
+    intr = camera_intrinsics_from_rig(camera_rig_cfg)
+    center = compute_glider_position(scene_config, sim_time_s)
+    center_proj = project_world_point_to_pixel(list(center), camera_rig_cfg, camera_def)
+    projected = [project_world_point_to_pixel(p, camera_rig_cfg, camera_def) for p in approximate_glider_bbox_corners(scene_config, sim_time_s)]
+    valid = [p for p in projected if p["u_px"] is not None and p["v_px"] is not None and p["depth_m"] > 0]
+    if not valid:
+        return {"visible": False, "center": center_proj, "bbox": None}
+    u_values = [float(p["u_px"]) for p in valid]
+    v_values = [float(p["v_px"]) for p in valid]
+    xmin = max(0.0, min(u_values))
+    xmax = min(float(intr["width_px"] - 1), max(u_values))
+    ymin = max(0.0, min(v_values))
+    ymax = min(float(intr["height_px"] - 1), max(v_values))
+    bbox_visible = xmax > xmin and ymax > ymin and any(bool(p["visible"]) for p in projected)
+    return {
+        "visible": bool(center_proj.get("visible") or bbox_visible),
+        "center": center_proj,
+        "bbox": {"xmin": xmin, "ymin": ymin, "xmax": xmax, "ymax": ymax} if bbox_visible else None,
+    }
+
+
+def write_frame_labels_csv(
+    output_dir: Path,
+    scene_config: dict[str, Any],
+    camera_rig_cfg: dict[str, Any],
+    camera_defs: list[dict[str, Any]],
+    num_frames: int,
+    time_step_s: float,
+) -> None:
+    labels_dir = output_dir / "labels"
+    labels_dir.mkdir(parents=True, exist_ok=True)
+    manifest_map = load_capture_manifest_map(output_dir)
+    fieldnames = [
+        "frame_index", "timestamp_s",
+        "glider_world_x_m", "glider_world_y_m", "glider_world_z_m",
+        "glider_vx_m_s", "glider_vy_m_s", "glider_vz_m_s", "glider_speed_m_s",
+        "glider_ax_m_s2", "glider_ay_m_s2", "glider_az_m_s2", "glider_accel_norm_m_s2",
+        "theta_rad", "angular_velocity_rad_s", "horizontal_tether_length_m", "physical_anchor_to_glider_length_m",
+    ]
+    for cam in camera_defs:
+        name = cam["name"]
+        fieldnames += [
+            f"{name}_rgb", f"{name}_semantic_raw_dir", f"{name}_visible_projected",
+            f"{name}_center_u_px", f"{name}_center_v_px", f"{name}_depth_m",
+            f"{name}_bbox_xmin_px", f"{name}_bbox_ymin_px", f"{name}_bbox_xmax_px", f"{name}_bbox_ymax_px",
+        ]
+    path = labels_dir / "frame_labels.csv"
+    with open(path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        writer.writeheader()
+        for frame_index in range(num_frames):
+            sim_time_s = frame_index * time_step_s
+            state = compute_glider_state_row(scene_config, frame_index, sim_time_s, manifest_map)
+            theta = float(scene_config.get("angular_velocity_rad_s", 0.0)) * sim_time_s
+            omega = float(scene_config.get("angular_velocity_rad_s", 0.0))
+            tether = float(scene_config.get("tether_length_m", 0.0))
+            ax = -tether * omega * omega * math.cos(theta)
+            ay = -tether * omega * omega * math.sin(theta)
+            az = 0.0
+            row: dict[str, Any] = {
+                "frame_index": frame_index,
+                "timestamp_s": f"{sim_time_s:.9f}",
+                "glider_world_x_m": state["glider_x_m"],
+                "glider_world_y_m": state["glider_y_m"],
+                "glider_world_z_m": state["glider_z_m"],
+                "glider_vx_m_s": state["glider_vx_m_s"],
+                "glider_vy_m_s": state["glider_vy_m_s"],
+                "glider_vz_m_s": state["glider_vz_m_s"],
+                "glider_speed_m_s": state["linear_speed_m_s"],
+                "glider_ax_m_s2": f"{ax:.9f}",
+                "glider_ay_m_s2": f"{ay:.9f}",
+                "glider_az_m_s2": f"{az:.9f}",
+                "glider_accel_norm_m_s2": f"{math.sqrt(ax*ax+ay*ay+az*az):.9f}",
+                "theta_rad": f"{theta:.9f}",
+                "angular_velocity_rad_s": f"{omega:.9f}",
+                "horizontal_tether_length_m": state["actual_horizontal_tether_length_m"],
+                "physical_anchor_to_glider_length_m": state["actual_3d_anchor_to_glider_length_m"],
+            }
+            for cam in camera_defs:
+                name = cam["name"]
+                projection = projected_bbox_for_camera(scene_config, camera_rig_cfg, cam, frame_index, sim_time_s)
+                center = projection["center"]
+                bbox = projection["bbox"]
+                row[f"{name}_rgb"] = manifest_map.get(name, {}).get(frame_index, {}).get("relative_path", default_rgb_relative_path(name, frame_index))
+                row[f"{name}_semantic_raw_dir"] = f"annotations/{name}/replicator_raw"
+                row[f"{name}_visible_projected"] = str(bool(projection["visible"])).lower()
+                row[f"{name}_center_u_px"] = "" if center.get("u_px") is None else f"{float(center['u_px']):.6f}"
+                row[f"{name}_center_v_px"] = "" if center.get("v_px") is None else f"{float(center['v_px']):.6f}"
+                row[f"{name}_depth_m"] = f"{float(center.get('depth_m', 0.0)):.6f}"
+                row[f"{name}_bbox_xmin_px"] = "" if bbox is None else f"{bbox['xmin']:.6f}"
+                row[f"{name}_bbox_ymin_px"] = "" if bbox is None else f"{bbox['ymin']:.6f}"
+                row[f"{name}_bbox_xmax_px"] = "" if bbox is None else f"{bbox['xmax']:.6f}"
+                row[f"{name}_bbox_ymax_px"] = "" if bbox is None else f"{bbox['ymax']:.6f}"
+            writer.writerow(row)
+
+
+def write_annotation_inventory(output_dir: Path) -> None:
+    annotations_root = output_dir / "annotations"
+    rows: list[dict[str, Any]] = []
+    if annotations_root.exists():
+        for path in sorted(annotations_root.rglob("*")):
+            if path.is_file():
+                rows.append({
+                    "relative_path": str(path.relative_to(output_dir)).replace("\\", "/"),
+                    "file_name": path.name,
+                    "suffix": path.suffix.lower(),
+                    "size_bytes": path.stat().st_size,
+                })
+    inventory_path = output_dir / "labels" / "annotation_inventory.csv"
+    inventory_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(inventory_path, "w", newline="", encoding="utf-8") as file:
+        writer = csv.DictWriter(file, fieldnames=["relative_path", "file_name", "suffix", "size_bytes"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def write_dataset_manifest_json(
+    output_dir: Path,
+    scene_config: dict[str, Any],
+    camera_rig_cfg: dict[str, Any],
+    camera_defs: list[dict[str, Any]],
+    num_frames: int,
+    time_step_s: float,
+    run_id: str,
+) -> None:
+    files = {
+        "profile_used": "profile_used.json",
+        "camera_model": "camera_model.json",
+        "frame_state": "frame_state.csv",
+        "capture_manifest": "capture_manifest.csv",
+        "frame_labels": "labels/frame_labels.csv",
+        "semantic_id_map": "labels/semantic_id_map.json",
+        "annotation_inventory": "labels/annotation_inventory.csv",
+        "camera_rig_layout": "camera_rig_layout.svg",
+        "performance_summary": "performance/run_performance_summary.json",
+        "run_log": "logs/run.log",
+    }
+    manifest = {
+        "created_utc": datetime.now(timezone.utc).isoformat(),
+        "schema": "upwind_dataset_manifest_v1",
+        "scene_name": scene_config.get("scene_name", ""),
+        "run_id": run_id,
+        "num_frames": int(num_frames),
+        "time_step_s": float(time_step_s),
+        "cameras": [cam["name"] for cam in camera_defs],
+        "environment": scene_config.get("environment", {}),
+        "glider_asset": scene_config.get("glider_asset", {}),
+        "annotations": normalize_annotations(scene_config.get("annotations", {})),
+        "files": files,
+        "notes": [
+            "frame_labels.csv is a lightweight per-frame index and projected glider label table.",
+            "Raw Replicator annotation files are stored under annotations/<camera>/replicator_raw when enabled.",
+            "camera_model.json exports the known virtual camera model; it is not a chessboard calibration result.",
+        ],
+    }
+    (output_dir / "dataset_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def write_capture_metadata(
